@@ -279,26 +279,62 @@ class RelayCoordinator:
         if self._discord_channel is None:
             channel = self.discord_bot.get_channel(self.settings.discord_channel_id)
             if channel is None:
-                channel = await self.discord_bot.fetch_channel(self.settings.discord_channel_id)
+                try:
+                    channel = await self.discord_bot.fetch_channel(self.settings.discord_channel_id)
+                except discord.NotFound:
+                    logger.error(
+                        "Discord channel ID %s not found. Please check:\n"
+                        "  1. The channel ID in your .env file (DISCORD_CHANNEL_ID)\n"
+                        "  2. The bot has access to the channel\n"
+                        "  3. The channel exists in a server where the bot is a member",
+                        self.settings.discord_channel_id
+                    )
+                    # Don't raise - allow bot to continue running, but IRC relay won't work
+                    return
+                except discord.Forbidden:
+                    logger.error(
+                        "Bot does not have permission to access channel %s. "
+                        "Please ensure the bot has 'View Channels' and 'Send Messages' permissions.",
+                        self.settings.discord_channel_id
+                    )
+                    return
             if not isinstance(channel, discord.TextChannel):
-                raise RuntimeError("Configured channel ID is not a text channel")
+                logger.error(
+                    "Configured channel ID %s is not a text channel. "
+                    "Please set DISCORD_CHANNEL_ID to a text channel ID.",
+                    self.settings.discord_channel_id
+                )
+                return
             self._discord_channel = channel
             logger.info("Bridging Discord channel #%s (%s)", channel.name, channel.id)
-            await channel.send("🔗 IRC relay is online.")
-        if not self._slash_synced:
-            guild = self._discord_channel.guild
             try:
-                # Only sync guild-specific commands to avoid duplicates with global commands
-                if guild:
-                    await self.discord_bot.tree.sync(guild=guild)
+                await channel.send("🔗 IRC relay is online.")
+            except discord.Forbidden:
+                logger.warning("Bot cannot send messages to channel #%s. Check permissions.", channel.name)
+        if not self._slash_synced:
+            # Only sync if we have a valid channel
+            if self._discord_channel is not None:
+                guild = self._discord_channel.guild
+                try:
+                    # Only sync guild-specific commands to avoid duplicates with global commands
+                    if guild:
+                        await self.discord_bot.tree.sync(guild=guild)
+                    else:
+                        # No guild available, sync global commands
+                        await self.discord_bot.tree.sync()
+                except discord.HTTPException:
+                    logger.exception("Failed to sync application commands for guild %s", guild.id if guild else "global")
                 else:
-                    # No guild available, sync global commands
-                    await self.discord_bot.tree.sync()
-            except discord.HTTPException:
-                logger.exception("Failed to sync application commands for guild %s", guild.id if guild else "global")
+                    logger.info("Slash commands synced for guild %s", guild.id if guild else "global")
+                    self._slash_synced = True
             else:
-                logger.info("Slash commands synced for guild %s", guild.id if guild else "global")
-                self._slash_synced = True
+                # No channel available, sync global commands as fallback
+                try:
+                    await self.discord_bot.tree.sync()
+                    logger.info("Slash commands synced globally (no channel configured)")
+                    self._slash_synced = True
+                except discord.HTTPException:
+                    logger.exception("Failed to sync application commands globally")
 
     async def handle_discord_message(self, message: discord.Message) -> None:
         self.record_message()
@@ -353,9 +389,23 @@ class RelayCoordinator:
             if self._discord_channel is None:
                 channel = self.discord_bot.get_channel(self.settings.discord_channel_id)
                 if channel is None:
-                    channel = await self.discord_bot.fetch_channel(self.settings.discord_channel_id)
+                    try:
+                        channel = await self.discord_bot.fetch_channel(self.settings.discord_channel_id)
+                    except discord.NotFound:
+                        raise RuntimeError(
+                            f"Discord channel ID {self.settings.discord_channel_id} not found. "
+                            "Please check your DISCORD_CHANNEL_ID in .env and ensure the bot has access to the channel."
+                        )
+                    except discord.Forbidden:
+                        raise RuntimeError(
+                            f"Bot does not have permission to access channel {self.settings.discord_channel_id}. "
+                            "Please ensure the bot has 'View Channels' and 'Send Messages' permissions."
+                        )
                 if not isinstance(channel, discord.TextChannel):
-                    raise RuntimeError("Configured channel ID is not a text channel")
+                    raise RuntimeError(
+                        f"Configured channel ID {self.settings.discord_channel_id} is not a text channel. "
+                        "Please set DISCORD_CHANNEL_ID to a text channel ID."
+                    )
                 self._discord_channel = channel
                 self._guild_id = channel.guild.id
         return self._discord_channel
