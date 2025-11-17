@@ -26,7 +26,6 @@ UpLove is a production-ready Python bot that bridges Discord and IRC while power
 1. **Create a virtual environment and install dependencies:**
 
    ```bash
-   cd /Users/adamhockley/Desktop/botnew
    python3 -m venv .venv
    source .venv/bin/activate
    pip install -r requirements.txt
