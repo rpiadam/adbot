@@ -35,11 +35,13 @@ UpLove is a production-ready Python bot that bridges Discord and IRC while power
 
    Copy `example.env` to `.env` and fill in your secrets. At minimum you must set:
 
-   - `DISCORD_TOKEN`
-   - `DISCORD_CHANNEL_ID`
-   - `IRC_SERVER`
-   - `IRC_CHANNEL`
-   - `IRC_NICK`
+   - `DISCORD_TOKEN` - Your Discord bot token (get from https://discord.com/developers/applications)
+   - `DISCORD_CHANNEL_ID` - The Discord channel ID to bridge
+   - `IRC_SERVER` or `IRC_SERVERS` - IRC server address(es)
+   - `IRC_CHANNEL` or `IRC_CHANNELS` - IRC channel name(s)
+   - `IRC_NICK` or `IRC_NICKS` - IRC nickname(s)
+   
+   **Note:** For multiple IRC networks, use `IRC_SERVERS`, `IRC_PORTS`, `IRC_TLS`, `IRC_CHANNELS`, and `IRC_NICKS` as comma-separated lists. See `example.env` for details.
 
    Optionally set:
 

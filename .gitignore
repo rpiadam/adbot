@@ -117,3 +117,4 @@ wheels/
 .installed.cfg
 *.egg
 
+.env.backup*
