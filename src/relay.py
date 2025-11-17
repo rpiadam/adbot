@@ -67,7 +67,9 @@ class IRCRelayClient(pydle.Client):
         if source == self.nickname:
             # Ignore echoes of our own messages.
             return
-        await self.coordinator.handle_irc_message(source, message)
+        # Pass network identifier so messages can be distinguished
+        network_name = self.network_config.server
+        await self.coordinator.handle_irc_message(source, message, network_name=network_name)
 
     async def on_quit(self, user, message=None):
         await super().on_quit(user, message)
@@ -91,6 +93,37 @@ class IRCRelayClient(pydle.Client):
             except Exception as e:
                 logger.error("Failed to reconnect to IRC %s:%s: %s", self.network_config.server, self.network_config.port, e)
                 self.coordinator.record_error()
+
+    async def on_raw(self, message):
+        """Override to handle malformed IRC messages gracefully."""
+        try:
+            await super().on_raw(message)
+        except ValueError as e:
+            # Handle cases where IRC server sends malformed messages
+            # (e.g., JOIN messages with unexpected format)
+            error_str = str(e)
+            if "too many values to unpack" in error_str or "not enough values to unpack" in error_str:
+                logger.debug("Ignoring malformed IRC message: %s (error: %s)", message, e)
+                return  # Don't re-raise, just ignore
+            else:
+                raise
+        except Exception as e:
+            # Log other unexpected errors but don't crash
+            logger.warning("Error processing IRC message %s: %s", message, e)
+            self.coordinator.record_error()
+            # Don't re-raise to prevent task crashes
+    
+    async def on_raw_join(self, message):
+        """Override to handle malformed JOIN messages specifically."""
+        try:
+            await super().on_raw_join(message)
+        except (ValueError, TypeError) as e:
+            # Handle malformed JOIN messages (e.g., wrong number of parameters)
+            error_str = str(e)
+            if "too many values to unpack" in error_str or "not enough values to unpack" in error_str or "unpack" in error_str.lower():
+                logger.debug("Ignoring malformed JOIN message: %s (error: %s)", message, e)
+                return  # Silently ignore malformed JOIN messages
+            raise
 
 
 class DiscordRelayBot(commands.Bot):
@@ -277,31 +310,33 @@ class RelayCoordinator:
 
     async def on_discord_ready(self) -> None:
         if self._discord_channel is None:
+            # Check if channel ID is placeholder - if so, skip silently
+            if self.settings.discord_channel_id == 123456789012345678:
+                logger.debug("Discord channel ID not configured (using placeholder). IRC relay will be disabled.")
+                return
+            
             channel = self.discord_bot.get_channel(self.settings.discord_channel_id)
             if channel is None:
                 try:
                     channel = await self.discord_bot.fetch_channel(self.settings.discord_channel_id)
                 except discord.NotFound:
-                    logger.error(
-                        "Discord channel ID %s not found. Please check:\n"
-                        "  1. The channel ID in your .env file (DISCORD_CHANNEL_ID)\n"
-                        "  2. The bot has access to the channel\n"
-                        "  3. The channel exists in a server where the bot is a member",
+                    logger.warning(
+                        "Discord channel ID %s not found. IRC relay disabled. "
+                        "Set DISCORD_CHANNEL_ID in .env to enable IRC relay.",
                         self.settings.discord_channel_id
                     )
                     # Don't raise - allow bot to continue running, but IRC relay won't work
                     return
                 except discord.Forbidden:
-                    logger.error(
-                        "Bot does not have permission to access channel %s. "
-                        "Please ensure the bot has 'View Channels' and 'Send Messages' permissions.",
+                    logger.warning(
+                        "Bot does not have permission to access channel %s. IRC relay disabled. "
+                        "Ensure the bot has 'View Channels' and 'Send Messages' permissions.",
                         self.settings.discord_channel_id
                     )
                     return
             if not isinstance(channel, discord.TextChannel):
-                logger.error(
-                    "Configured channel ID %s is not a text channel. "
-                    "Please set DISCORD_CHANNEL_ID to a text channel ID.",
+                logger.warning(
+                    "Configured channel ID %s is not a text channel. IRC relay disabled.",
                     self.settings.discord_channel_id
                 )
                 return
@@ -350,20 +385,30 @@ class RelayCoordinator:
         prefix = f"<{message.author.display_name}>"
         await self.send_to_irc(f"{prefix} {content}")
 
-    async def handle_irc_message(self, author: str, content: str) -> None:
+    async def handle_irc_message(self, author: str, content: str, network_name: Optional[str] = None) -> None:
         self.record_message()
         channel = await self._ensure_discord_channel()
         author_label = author.strip()
         allowed_mentions = discord.AllowedMentions.none()
+        
+        # If multiple IRC networks, include network identifier in username
+        # Only show network if there are multiple networks configured
+        has_multiple_networks = len(self.irc_clients) > 1
+        if has_multiple_networks and network_name:
+            # Format username to include network: "User [Network]"
+            username = f"{author_label} [{network_name}]" if author_label else f"IRC [{network_name}]"
+        else:
+            username = author_label or "IRC"
+        
         webhook = await self._ensure_discord_webhook(channel)
         if webhook is not None:
             await webhook.send(
                 content,
-                username=author_label or "IRC",
+                username=username,
                 allowed_mentions=allowed_mentions,
             )
         else:
-            formatted = f"**<{author_label}>** {content}"
+            formatted = f"**<{username}>** {content}"
             await channel.send(formatted, allowed_mentions=allowed_mentions)
 
     async def handle_irc_quit(self, author: str, reason: str) -> None:
@@ -387,6 +432,12 @@ class RelayCoordinator:
             return self._discord_channel
         async with self._lock:
             if self._discord_channel is None:
+                # Check if channel ID is placeholder - if so, raise a clear error
+                if self.settings.discord_channel_id == 123456789012345678:
+                    raise RuntimeError(
+                        "Discord channel ID not configured. Set DISCORD_CHANNEL_ID in .env to enable IRC relay."
+                    )
+                
                 channel = self.discord_bot.get_channel(self.settings.discord_channel_id)
                 if channel is None:
                     try:
@@ -394,17 +445,16 @@ class RelayCoordinator:
                     except discord.NotFound:
                         raise RuntimeError(
                             f"Discord channel ID {self.settings.discord_channel_id} not found. "
-                            "Please check your DISCORD_CHANNEL_ID in .env and ensure the bot has access to the channel."
+                            "Set DISCORD_CHANNEL_ID in .env to enable IRC relay."
                         )
                     except discord.Forbidden:
                         raise RuntimeError(
                             f"Bot does not have permission to access channel {self.settings.discord_channel_id}. "
-                            "Please ensure the bot has 'View Channels' and 'Send Messages' permissions."
+                            "Ensure the bot has 'View Channels' and 'Send Messages' permissions."
                         )
                 if not isinstance(channel, discord.TextChannel):
                     raise RuntimeError(
-                        f"Configured channel ID {self.settings.discord_channel_id} is not a text channel. "
-                        "Please set DISCORD_CHANNEL_ID to a text channel ID."
+                        f"Configured channel ID {self.settings.discord_channel_id} is not a text channel."
                     )
                 self._discord_channel = channel
                 self._guild_id = channel.guild.id
@@ -593,20 +643,30 @@ class RelayCoordinator:
                 await asyncio.sleep(5)
                 continue
             except RuntimeError as e:
-                if "readuntil() called while another coroutine is already waiting" in str(e):
-                    logger.warning("IRC connection read conflict detected %s:%s, recreating client...", network_config.server, network_config.port)
+                error_str = str(e)
+                if "readuntil() called while another coroutine is already waiting" in error_str:
+                    # This is a known pydle concurrency issue with multiple IRC clients - suppress it
+                    logger.debug("IRC read conflict detected %s:%s, recreating client...", network_config.server, network_config.port)
                     await self._recreate_irc_client(client_index)
                     client = self.irc_clients[client_index]
                     await asyncio.sleep(2)
                     continue
                 else:
-                    logger.exception("Unexpected RuntimeError in IRC client %s:%s", network_config.server, network_config.port)
+                    logger.warning("RuntimeError in IRC client %s:%s: %s", network_config.server, network_config.port, error_str)
                     await self._recreate_irc_client(client_index)
                     client = self.irc_clients[client_index]
                     await asyncio.sleep(5)
                     continue
             except Exception as e:
-                logger.exception("Error in IRC client %s:%s, attempting to reconnect: %s", network_config.server, network_config.port, e)
+                error_str = str(e)
+                # Also check for readuntil errors that might be caught as generic Exception
+                if "readuntil() called while another coroutine is already waiting" in error_str:
+                    logger.debug("IRC read conflict (generic Exception) %s:%s, recreating client...", network_config.server, network_config.port)
+                    await self._recreate_irc_client(client_index)
+                    client = self.irc_clients[client_index]
+                    await asyncio.sleep(2)
+                    continue
+                logger.warning("Error in IRC client %s:%s: %s", network_config.server, network_config.port, error_str)
                 await self._recreate_irc_client(client_index)
                 client = self.irc_clients[client_index]
                 await asyncio.sleep(5)

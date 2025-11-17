@@ -60,6 +60,9 @@ def configure_logging() -> None:
     # Ensure httpx/httpcore logging stays at WARNING level
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    
+    # Suppress pydle verbose logging
+    logging.getLogger("pydle").setLevel(logging.WARNING)
 
 
 def _is_port_in_use(host: str, port: int) -> bool:
@@ -119,6 +122,28 @@ async def run_api(coordinator: RelayCoordinator) -> None:
 
 async def main_async() -> None:
     configure_logging()
+    
+    # Set asyncio exception handler to suppress known harmless errors
+    def _suppress_task_exceptions(loop, context):
+        """Suppress annoying asyncio task exception warnings for known issues."""
+        exception = context.get('exception')
+        if exception:
+            error_str = str(exception)
+            # Suppress readuntil() errors - these are handled gracefully by our code
+            if "readuntil() called while another coroutine is already waiting" in error_str:
+                return  # Suppress this warning completely
+            # Suppress other known harmless RuntimeErrors
+            if isinstance(exception, RuntimeError) and "readuntil" in error_str.lower():
+                return
+        # For other exceptions, use default handler
+        if hasattr(loop, 'default_exception_handler'):
+            loop.default_exception_handler(context)
+        else:
+            # Fallback: just log at debug level
+            logger.debug(f"Unhandled exception in task: {context}")
+    
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(_suppress_task_exceptions)
     
     # Validate settings before starting
     try:
