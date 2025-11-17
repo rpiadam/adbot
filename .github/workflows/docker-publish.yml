@@ -18,8 +18,19 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
+    - name: Check for Docker Hub credentials
+      id: docker-check
+      run: |
+        if [ -n "${{ secrets.DOCKER_USERNAME }}" ] && [ -n "${{ secrets.DOCKER_PASSWORD }}" ]; then
+          echo "has_credentials=true" >> $GITHUB_OUTPUT
+          echo "image_name=${{ secrets.DOCKER_USERNAME }}/uplove-bot" >> $GITHUB_OUTPUT
+        else
+          echo "has_credentials=false" >> $GITHUB_OUTPUT
+          echo "image_name=uplove-bot" >> $GITHUB_OUTPUT
+        fi
+
     - name: Login to Docker Hub
-      if: github.event_name != 'pull_request'
+      if: github.event_name != 'pull_request' && steps.docker-check.outputs.has_credentials == 'true'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
@@ -29,7 +40,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ secrets.DOCKER_USERNAME }}/uplove-bot
+        images: ${{ steps.docker-check.outputs.image_name }}
         tags: |
           type=ref,event=branch
           type=ref,event=pr
@@ -41,7 +52,7 @@ jobs:
       uses: docker/build-push-action@v5
       with:
         context: .
-        push: ${{ github.event_name != 'pull_request' }}
+        push: ${{ github.event_name != 'pull_request' && steps.docker-check.outputs.has_credentials == 'true' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
