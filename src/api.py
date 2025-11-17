@@ -127,7 +127,16 @@ def create_app(coordinator: RelayCoordinator, settings: Settings) -> FastAPI:
             "guilds": len(bot.guilds),
             "users": sum(g.member_count or 0 for g in bot.guilds),
             "latency": bot.latency * 1000 if bot.latency else 0.0,
-            "irc_connected": coordinator.irc_client.connected,
+            "irc_connected": any(client.connected for client in coordinator.irc_clients) if coordinator.irc_clients else False,
+            "irc_networks": [
+                {
+                    "server": client.network_config.server,
+                    "port": client.network_config.port,
+                    "channel": client.network_config.channel,
+                    "connected": client.connected,
+                }
+                for client in coordinator.irc_clients
+            ],
             "uptime_seconds": health["uptime_seconds"],
             "uptime_formatted": health["uptime_formatted"],
             "error_count": health["error_count"],

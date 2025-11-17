@@ -39,15 +39,16 @@ logger = logging.getLogger(__name__)
 class IRCRelayClient(pydle.Client):
     """IRC client that forwards events back to the relay coordinator."""
 
-    def __init__(self, coordinator: "RelayCoordinator"):
+    def __init__(self, coordinator: "RelayCoordinator", network_config):
         loop = asyncio.get_running_loop()
         super().__init__(
-            nickname=coordinator.settings.irc_nick,
-            realname=coordinator.settings.irc_nick,
+            nickname=network_config.nick,
+            realname=network_config.nick,
             eventloop=loop,
         )
         self.coordinator = coordinator
-        self.target_channel = coordinator.settings.irc_channel
+        self.network_config = network_config
+        self.target_channel = network_config.channel
         self._is_first_connect = True
 
     async def on_connect(self):
@@ -57,7 +58,7 @@ class IRCRelayClient(pydle.Client):
         if not self._is_first_connect:
             self.coordinator.record_irc_reconnect()
         self._is_first_connect = False
-        logger.info("Connected to IRC %s:%s as %s", self.coordinator.settings.irc_server, self.coordinator.settings.irc_port, self.nickname)
+        logger.info("Connected to IRC %s:%s as %s", self.network_config.server, self.network_config.port, self.nickname)
 
     async def on_message(self, target, source, message):
         await super().on_message(target, source, message)
@@ -83,12 +84,12 @@ class IRCRelayClient(pydle.Client):
             try:
                 await asyncio.sleep(5)  # Wait before reconnecting
                 await self.connect(
-                    self.coordinator.settings.irc_server,
-                    self.coordinator.settings.irc_port,
-                    tls=self.coordinator.settings.irc_tls,
+                    self.network_config.server,
+                    self.network_config.port,
+                    tls=self.network_config.tls,
                 )
             except Exception as e:
-                logger.error("Failed to reconnect to IRC: %s", e)
+                logger.error("Failed to reconnect to IRC %s:%s: %s", self.network_config.server, self.network_config.port, e)
                 self.coordinator.record_error()
 
 
@@ -161,7 +162,7 @@ class RelayCoordinator:
         self.settings = settings
         self.config_store = ConfigStore(settings)
         self.discord_bot = DiscordRelayBot(self)
-        self.irc_client = IRCRelayClient(self)
+        self.irc_clients: list[IRCRelayClient] = [IRCRelayClient(self, network) for network in settings.irc_networks]
         self._discord_channel: Optional[discord.TextChannel] = None
         self._discord_webhook: Optional[discord.Webhook] = None
         self._lock = asyncio.Lock()
@@ -225,7 +226,16 @@ class RelayCoordinator:
         uptime_days = uptime_seconds / 86400
         
         discord_ready = self.discord_bot.is_ready() if self.discord_bot else False
-        irc_connected = self.irc_client.connected if self.irc_client else False
+        irc_connected = any(client.connected for client in self.irc_clients) if self.irc_clients else False
+        irc_networks_status = [
+            {
+                "server": client.network_config.server,
+                "port": client.network_config.port,
+                "channel": client.network_config.channel,
+                "connected": client.connected,
+            }
+            for client in self.irc_clients
+        ]
         
         # Calculate message rate (messages per hour)
         message_rate = 0.0
@@ -253,6 +263,7 @@ class RelayCoordinator:
             "last_error_time": self._last_error_time,
             "discord_connected": discord_ready,
             "irc_connected": irc_connected,
+            "irc_networks": irc_networks_status,
             "discord_reconnect_count": self._discord_reconnect_count,
             "irc_reconnect_count": self._irc_reconnect_count,
             "message_count": self._message_count,
@@ -403,26 +414,32 @@ class RelayCoordinator:
         return self._guild_id
 
     async def send_to_irc(self, message: str) -> None:
-        if not self.irc_client.connected:
-            logger.warning("Dropping message; IRC client not connected: %s", message)
+        """Send message to all connected IRC networks."""
+        sent_to_any = False
+        for client in self.irc_clients:
+            if client.connected:
+                try:
+                    await client.message(client.target_channel, message)
+                    sent_to_any = True
+                except Exception as e:
+                    logger.error("Failed to send message to IRC %s:%s: %s", client.network_config.server, client.network_config.port, e)
+                    self.record_error()
+        
+        if not sent_to_any:
+            logger.warning("Dropping message; no IRC clients connected: %s", message)
             self.record_error()
-            return
-        try:
-            await self.irc_client.message(self.settings.irc_channel, message)
-        except Exception as e:
-            logger.error("Failed to send message to IRC: %s", e)
-            self.record_error()
-            raise
 
     async def stop_irc(self) -> bool:
-        if not self.irc_client.connected:
-            return False
-        try:
-            await self.irc_client.quit(message="IRC relay disconnected via command")
-        except Exception:  # pragma: no cover - operational logging
-            logger.exception("Failed to disconnect from IRC on command.")
-            raise
-        return True
+        """Stop all IRC clients."""
+        stopped_any = False
+        for client in self.irc_clients:
+            if client.connected:
+                try:
+                    await client.quit(message="IRC relay disconnected via command")
+                    stopped_any = True
+                except Exception:  # pragma: no cover - operational logging
+                    logger.exception("Failed to disconnect from IRC %s:%s on command.", client.network_config.server, client.network_config.port)
+        return stopped_any
 
     async def send_to_discord_webhook(
         self,
@@ -477,49 +494,71 @@ class RelayCoordinator:
     async def start_discord(self) -> None:
         await self.discord_bot.start(self.settings.discord_token)
 
-    async def _recreate_irc_client(self) -> None:
-        """Recreate the IRC client instance if needed."""
+    async def _recreate_irc_client(self, client_index: int) -> None:
+        """Recreate a specific IRC client instance if needed."""
+        if client_index >= len(self.irc_clients):
+            return
+        client = self.irc_clients[client_index]
         try:
-            if self.irc_client.connected:
-                await self.irc_client.disconnect(expected=False)
+            if client.connected:
+                await client.disconnect(expected=False)
         except Exception:
             pass
         # Create a new client instance to avoid state issues
-        self.irc_client = IRCRelayClient(self)
+        network_config = self.settings.irc_networks[client_index]
+        self.irc_clients[client_index] = IRCRelayClient(self, network_config)
 
     async def start_irc(self) -> None:
-        """Start the IRC client with proper error handling."""
+        """Start all IRC clients with proper error handling."""
+        # Start each IRC client in its own task
+        tasks = []
+        for i, client in enumerate(self.irc_clients):
+            task = asyncio.create_task(self._start_irc_client(i))
+            tasks.append(task)
+        
+        # Wait for all tasks (they run forever until cancelled)
+        await asyncio.gather(*tasks, return_exceptions=True)
+    
+    async def _start_irc_client(self, client_index: int) -> None:
+        """Start a single IRC client with proper error handling."""
+        client = self.irc_clients[client_index]
+        network_config = self.settings.irc_networks[client_index]
+        
         while True:
             try:
-                if not self.irc_client.connected:
-                    await self.irc_client.connect(
-                        self.settings.irc_server,
-                        self.settings.irc_port,
-                        tls=self.settings.irc_tls,
+                if not client.connected:
+                    await client.connect(
+                        network_config.server,
+                        network_config.port,
+                        tls=network_config.tls,
                     )
-                await self.irc_client.handle_forever()
+                await client.handle_forever()
             except asyncio.CancelledError:
-                logger.info("IRC client task cancelled")
+                logger.info("IRC client task %s:%s cancelled", network_config.server, network_config.port)
                 break
             except (ConnectionResetError, OSError) as e:
-                logger.warning("IRC connection lost (%s), reconnecting...", type(e).__name__)
-                await self._recreate_irc_client()
+                logger.warning("IRC connection lost %s:%s (%s), reconnecting...", network_config.server, network_config.port, type(e).__name__)
+                await self._recreate_irc_client(client_index)
+                client = self.irc_clients[client_index]
                 await asyncio.sleep(5)
                 continue
             except RuntimeError as e:
                 if "readuntil() called while another coroutine is already waiting" in str(e):
-                    logger.warning("IRC connection read conflict detected, recreating client...")
-                    await self._recreate_irc_client()
+                    logger.warning("IRC connection read conflict detected %s:%s, recreating client...", network_config.server, network_config.port)
+                    await self._recreate_irc_client(client_index)
+                    client = self.irc_clients[client_index]
                     await asyncio.sleep(2)
                     continue
                 else:
-                    logger.exception("Unexpected RuntimeError in IRC client")
-                    await self._recreate_irc_client()
+                    logger.exception("Unexpected RuntimeError in IRC client %s:%s", network_config.server, network_config.port)
+                    await self._recreate_irc_client(client_index)
+                    client = self.irc_clients[client_index]
                     await asyncio.sleep(5)
                     continue
             except Exception as e:
-                logger.exception("Error in IRC client, attempting to reconnect: %s", e)
-                await self._recreate_irc_client()
+                logger.exception("Error in IRC client %s:%s, attempting to reconnect: %s", network_config.server, network_config.port, e)
+                await self._recreate_irc_client(client_index)
+                client = self.irc_clients[client_index]
                 await asyncio.sleep(5)
                 continue
 
@@ -528,7 +567,8 @@ class RelayCoordinator:
             logger.debug("Discord bot already closed")
         else:
             await self.discord_bot.close()
-        if self.irc_client.connected:
-            await self.irc_client.quit(message="Relay shutting down")
+        for client in self.irc_clients:
+            if client.connected:
+                await client.quit(message="Relay shutting down")
 
 

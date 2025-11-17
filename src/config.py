@@ -181,6 +181,16 @@ def _parse_csv(raw: Optional[str]) -> list[str]:
 
 
 @dataclass(frozen=True)
+class IRCNetworkConfig:
+    """Configuration for a single IRC network."""
+    server: str
+    port: int
+    tls: bool
+    channel: str
+    nick: str
+
+
+@dataclass(frozen=True)
 class Settings:
     discord_token: str
     discord_channel_id: int
@@ -191,11 +201,7 @@ class Settings:
     welcome_channel_id: Optional[int]
     welcome_message: Optional[str]
     announcements_channel_id: Optional[int]
-    irc_server: str
-    irc_port: int
-    irc_tls: bool
-    irc_channel: str
-    irc_nick: str
+    irc_networks: list[IRCNetworkConfig]
     moderation_log_channel_id: Optional[int]
     moderation_muted_role_id: Optional[int]
     moderation_min_account_age_days: Optional[int]
@@ -232,8 +238,55 @@ class Settings:
         guild_raw = _get_env("DISCORD_GUILD_ID", required=False)
         discord_guild_id = int(guild_raw) if guild_raw else None
 
-        irc_port = int(_get_env("IRC_PORT", required=False, default="6697"))
-        irc_tls = _get_env("IRC_TLS", required=False, default="true").lower() in {"1", "true", "yes"}
+        # Parse IRC networks - support both single network (backward compatible) and multiple networks
+        irc_networks = []
+        
+        # Check for new multi-network format
+        irc_servers_raw = _get_env("IRC_SERVERS", required=False)
+        if irc_servers_raw:
+            # Multi-network format: comma-separated lists
+            irc_servers = _parse_csv(irc_servers_raw)
+            irc_ports_raw = _get_env("IRC_PORTS", required=False, default="")
+            irc_ports_list = [int(p.strip()) if p.strip() else 6667 for p in irc_ports_raw.split(",")] if irc_ports_raw else []
+            irc_tls_raw = _get_env("IRC_TLS", required=False, default="")
+            irc_tls_list = [t.lower() in {"1", "true", "yes"} for t in irc_tls_raw.split(",")] if irc_tls_raw else []
+            irc_channels_raw = _get_env("IRC_CHANNELS", required=False, default="")
+            irc_channels = _parse_csv(irc_channels_raw) if irc_channels_raw else []
+            irc_nicks_raw = _get_env("IRC_NICKS", required=False, default="")
+            irc_nicks = _parse_csv(irc_nicks_raw) if irc_nicks_raw else []
+            
+            # Default values
+            default_port = int(_get_env("IRC_PORT", required=False, default="6667"))
+            default_tls = _get_env("IRC_TLS", required=False, default="false").lower() in {"1", "true", "yes"}
+            default_nick = _get_env("IRC_NICK", required=False, default="UpLove")
+            
+            for i, server in enumerate(irc_servers):
+                port = irc_ports_list[i] if i < len(irc_ports_list) else default_port
+                tls = irc_tls_list[i] if i < len(irc_tls_list) else default_tls
+                channel = irc_channels[i] if i < len(irc_channels) else ""
+                nick = irc_nicks[i] if i < len(irc_nicks) else default_nick
+                
+                if not channel:
+                    raise RuntimeError(f"IRC_CHANNELS must have an entry for each server (missing for server {i+1})")
+                
+                irc_networks.append(IRCNetworkConfig(
+                    server=server,
+                    port=port,
+                    tls=tls,
+                    channel=channel,
+                    nick=nick,
+                ))
+        else:
+            # Single network format (backward compatible)
+            irc_port = int(_get_env("IRC_PORT", required=False, default="6667"))
+            irc_tls = _get_env("IRC_TLS", required=False, default="false").lower() in {"1", "true", "yes"}
+            irc_networks.append(IRCNetworkConfig(
+                server=_get_env("IRC_SERVER"),
+                port=irc_port,
+                tls=irc_tls,
+                channel=_get_env("IRC_CHANNEL"),
+                nick=_get_env("IRC_NICK"),
+            ))
 
         settings = cls(
             discord_token=_get_env("DISCORD_TOKEN"),
@@ -245,11 +298,7 @@ class Settings:
             welcome_channel_id=_parse_optional_int(_get_env("WELCOME_CHANNEL_ID", required=False)),
             welcome_message=_get_env("WELCOME_MESSAGE", required=False),
             announcements_channel_id=_parse_optional_int(_get_env("ANNOUNCEMENTS_CHANNEL_ID", required=False)),
-            irc_server=_get_env("IRC_SERVER"),
-            irc_port=irc_port,
-            irc_tls=irc_tls,
-            irc_channel=_get_env("IRC_CHANNEL"),
-            irc_nick=_get_env("IRC_NICK"),
+            irc_networks=irc_networks,
             moderation_log_channel_id=_parse_optional_int(_get_env("MODERATION_LOG_CHANNEL_ID", required=False)),
             moderation_muted_role_id=_parse_optional_int(_get_env("MODERATION_MUTED_ROLE_ID", required=False)),
             moderation_min_account_age_days=_parse_optional_int(_get_env("MODERATION_MIN_ACCOUNT_AGE_DAYS", required=False)),
@@ -295,18 +344,19 @@ class Settings:
         if not self.discord_channel_id:
             errors.append("DISCORD_CHANNEL_ID is required")
         
-        if not self.irc_server:
-            errors.append("IRC_SERVER is required")
+        # Validate IRC networks
+        if not self.irc_networks:
+            errors.append("At least one IRC network must be configured (IRC_SERVER or IRC_SERVERS)")
         
-        if not self.irc_channel:
-            errors.append("IRC_CHANNEL is required")
-        
-        if not self.irc_nick:
-            errors.append("IRC_NICK is required")
-        
-        # Validate port ranges
-        if not (1 <= self.irc_port <= 65535):
-            errors.append(f"IRC_PORT must be between 1 and 65535 (got {self.irc_port})")
+        for i, network in enumerate(self.irc_networks):
+            if not network.server:
+                errors.append(f"IRC network {i+1}: server is required")
+            if not network.channel:
+                errors.append(f"IRC network {i+1}: channel is required")
+            if not network.nick:
+                errors.append(f"IRC network {i+1}: nick is required")
+            if not (1 <= network.port <= 65535):
+                errors.append(f"IRC network {i+1}: port must be between 1 and 65535 (got {network.port})")
         
         if not (1 <= self.api_port <= 65535):
             errors.append(f"API_PORT must be between 1 and 65535 (got {self.api_port})")

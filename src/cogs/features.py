@@ -35,15 +35,19 @@ class FeaturesCog(commands.Cog):
             return
 
         discord_channel: Optional[discord.TextChannel] = await self.coordinator._ensure_discord_channel()
-        irc_connected = self.coordinator.irc_client.connected
         webhook_configured = bool(self.coordinator.settings.discord_webhook_url)
 
         parts = [
             "**Relay Status**",
             f"- Discord channel: #{discord_channel.name} ({discord_channel.id})",
-            f"- IRC connected: {'yes' if irc_connected else 'no'}",
             f"- Webhook configured: {'yes' if webhook_configured else 'no'}",
+            "",
+            "**IRC Networks:**",
         ]
+        
+        for i, client in enumerate(self.coordinator.irc_clients, 1):
+            status = "✅ connected" if client.connected else "❌ disconnected"
+            parts.append(f"{i}. {client.network_config.server}:{client.network_config.port} → {client.network_config.channel} ({status})")
 
         await interaction.response.send_message("\n".join(parts))
 
