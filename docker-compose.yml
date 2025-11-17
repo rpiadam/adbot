@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: uplove-bot
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Mount .env file (or use environment variables)
+      - ./.env:/app/.env:ro
+      # Persist data directory
+      - ./data:/app/data
+      # Persist logs
+      - ./logs:/app/logs
+      # Optional: mount encrypted env file
+      - ./.env.encrypted:/app/.env.encrypted:ro
+      # Optional: mount encryption key file
+      - ./.encryption_key:/app/.encryption_key:ro
+    environment:
+      # You can override environment variables here
+      # - DISCORD_TOKEN=${DISCORD_TOKEN}
+      # - API_HOST=0.0.0.0
+      # - API_PORT=8000
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge
+

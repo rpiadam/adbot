@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UpLove Dashboard</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        // Check if user is already logged in
+        const token = localStorage.getItem('token');
+        if (token) {
+            // Redirect to dashboard if token exists
+            window.location.href = '/dashboard?token=' + token;
+        } else {
+            // Redirect to login page
+            window.location.href = '/login.html';
+        }
+    </script>
+</head>
+<body>
+    <div style="display: flex; justify-content: center; align-items: center; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+        <div style="text-align: center;">
+            <h1>UpLove Dashboard</h1>
+            <p>Redirecting...</p>
+        </div>
+    </div>
+</body>
+</html>
+
+

@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UpLove Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .header h1 {
+            margin-bottom: 10px;
+        }
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        .container {
+            max-width: 1200px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            background: white;
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background 0.2s;
+            font-weight: 500;
+        }
+        .tab:hover {
+            background: #f0f0f0;
+        }
+        .tab.active {
+            background: #667eea;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .stat-card h3 {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #333;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .card h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        .feature-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .feature-item:last-child {
+            border-bottom: none;
+        }
+        .toggle {
+            position: relative;
+            width: 60px;
+            height: 30px;
+        }
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 30px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #667eea;
+        }
+        input:checked + .slider:before {
+            transform: translateX(30px);
+        }
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+            word-break: break-all;
+        }
+        .list-item:last-child {
+            border-bottom: none;
+        }
+        .list-item .url {
+            flex: 1;
+            margin-right: 15px;
+            color: #333;
+        }
+        .delete-btn {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .delete-btn:hover {
+            background: #c0392b;
+        }
+        .add-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .add-form input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .add-form button {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .add-form button:hover {
+            background: #5568d3;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        .log-entry {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        .log-timestamp {
+            color: #999;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .log-message {
+            color: #333;
+            word-break: break-word;
+        }
+        .log-guild {
+            color: #667eea;
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        .message {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            display: none;
+        }
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>UpLove Dashboard</h1>
+            <p>Bot Management & Control</p>
+        </div>
+        <div class="header-actions">
+            <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+    <div class="container">
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('overview'); this.classList.add('active');">
+                Overview
+            </div>
+            <div class="tab" onclick="switchTab('features'); this.classList.add('active');">
+                Features
+            </div>
+            <div class="tab" onclick="switchTab('monitoring'); this.classList.add('active');">
+                Monitoring
+            </div>
+            <div class="tab" onclick="switchTab('rss'); this.classList.add('active');">
+                RSS Feeds
+            </div>
+            <div class="tab" onclick="switchTab('logs'); this.classList.add('active');">
+                Moderation Logs
+            </div>
+            <div class="tab" onclick="switchTab('backups'); this.classList.add('active');">
+                Backups
+            </div>
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="overview" class="tab-content active">
+            <div class="stats" id="stats">
+                <div class="stat-card">
+                    <h3>Guilds</h3>
+                    <div class="value" id="guilds">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Users</h3>
+                    <div class="value" id="users">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Latency</h3>
+                    <div class="value" id="latency">-</div>
+                </div>
+            <div class="stat-card">
+                <h3>IRC Status</h3>
+                <div class="value" id="irc">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Uptime</h3>
+                <div class="value" id="uptime">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Errors</h3>
+                <div class="value" id="errors">-</div>
+            </div>
+        </div>
+    </div>
+
+        <!-- Features Tab -->
+        <div id="features" class="tab-content">
+            <div class="card">
+                <h2>Feature Toggles</h2>
+                <div id="featuresList"></div>
+            </div>
+        </div>
+
+        <!-- Monitoring Tab -->
+        <div id="monitoring" class="tab-content">
+            <div class="card">
+                <h2>Monitor URLs</h2>
+                <div id="monitorMessage" class="message"></div>
+                <div id="monitorList"></div>
+                <div class="add-form">
+                    <input type="url" id="monitorUrlInput" placeholder="https://example.com">
+                    <button onclick="addMonitorUrl()">Add URL</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- RSS Feeds Tab -->
+        <div id="rss" class="tab-content">
+            <div class="card">
+                <h2>RSS Feeds</h2>
+                <div id="rssMessage" class="message"></div>
+                <div id="rssList"></div>
+                <div class="add-form">
+                    <input type="url" id="rssUrlInput" placeholder="https://example.com/feed.xml">
+                    <button onclick="addRssFeed()">Add Feed</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Moderation Logs Tab -->
+        <div id="logs" class="tab-content">
+            <div class="card">
+                <h2>Moderation Logs</h2>
+                <div style="margin-bottom: 15px;">
+                    <label for="logLimit" style="margin-right: 10px;">Show last:</label>
+                    <select id="logLimit" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid #ddd;">
+                        <option value="50">50 entries</option>
+                        <option value="100" selected>100 entries</option>
+                        <option value="250">250 entries</option>
+                        <option value="500">500 entries</option>
+                    </select>
+                    <button onclick="loadLogs()" style="margin-left: 10px; padding: 5px 15px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">Refresh</button>
+                    <button onclick="exportLogs('json')" style="margin-left: 10px; padding: 5px 15px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer;">Export JSON</button>
+                    <button onclick="exportLogs('csv')" style="margin-left: 5px; padding: 5px 15px; background: #17a2b8; color: white; border: none; border-radius: 5px; cursor: pointer;">Export CSV</button>
+                </div>
+                <div id="logsList" style="max-height: 600px; overflow-y: auto;"></div>
+            </div>
+        </div>
+
+        <!-- Backups Tab -->
+        <div id="backups" class="tab-content">
+            <div class="card">
+                <h2>Backup Management</h2>
+                <div id="backupMessage" class="message"></div>
+                <div style="margin-bottom: 20px;">
+                    <button onclick="createBackup()" style="padding: 10px 20px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Create Backup</button>
+                    <button onclick="loadBackups()" style="margin-left: 10px; padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px;">Refresh List</button>
+                </div>
+                <div id="backupsList"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        // Get token from localStorage or URL parameter
+        let token = localStorage.getItem('token');
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('token')) {
+            token = urlParams.get('token');
+            localStorage.setItem('token', token);
+            // Clean URL
+            window.history.replaceState({}, document.title, '/dashboard');
+        }
+        
+        if (!token) {
+            window.location.href = '/';
+        }
+        
+        const headers = {
+            'Authorization': `Bearer ${token}`
+        };
+
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/';
+        }
+
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            
+            // Load data for the tab if needed
+            if (tabName === 'monitoring') {
+                loadMonitorUrls();
+            } else if (tabName === 'rss') {
+                loadRssFeeds();
+            } else if (tabName === 'logs') {
+                loadLogs();
+            } else if (tabName === 'backups') {
+                loadBackups();
+            }
+        }
+
+        function showMessage(elementId, message, isError = false) {
+            const msgEl = document.getElementById(elementId);
+            msgEl.textContent = message;
+            msgEl.className = `message ${isError ? 'error' : 'success'}`;
+            msgEl.style.display = 'block';
+            setTimeout(() => {
+                msgEl.style.display = 'none';
+            }, 3000);
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/stats', { headers });
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('guilds').textContent = data.guilds;
+                    document.getElementById('users').textContent = data.users.toLocaleString();
+                    document.getElementById('latency').textContent = Math.round(data.latency) + 'ms';
+                    document.getElementById('irc').textContent = data.irc_connected ? 'Connected' : 'Disconnected';
+                    document.getElementById('uptime').textContent = data.uptime_formatted || '-';
+                    document.getElementById('errors').textContent = data.error_count || 0;
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+        
+        async function loadFeatures() {
+            try {
+                const response = await fetch('/api/features', { headers });
+                if (response.ok) {
+                    const data = await response.json();
+                    const container = document.getElementById('featuresList');
+                    container.innerHTML = '';
+                    for (const [feature, enabled] of Object.entries(data.features)) {
+                        const div = document.createElement('div');
+                        div.className = 'feature-item';
+                        div.innerHTML = `
+                            <span style="text-transform: capitalize; font-weight: 500;">${feature}</span>
+                            <label class="toggle">
+                                <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleFeature('${feature}', this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        `;
+                        container.appendChild(div);
+                    }
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                console.error('Failed to load features:', error);
+            }
+        }
+        
+        async function toggleFeature(feature, enabled) {
+            try {
+                const formData = new FormData();
+                formData.append('enabled', enabled);
+                const response = await fetch(`/api/features/${feature}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        logout();
+                    } else {
+                        alert('Failed to toggle feature');
+                        loadFeatures();
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to toggle feature:', error);
+                loadFeatures();
+            }
+        }
+
+        async function loadMonitorUrls() {
+            try {
+                const response = await fetch('/api/monitor', { headers });
+                if (response.ok) {
+                    const data = await response.json();
+                    const container = document.getElementById('monitorList');
+                    if (data.urls.length === 0) {
+                        container.innerHTML = '<div class="empty-state">No monitor URLs configured</div>';
+                        return;
+                    }
+                    container.innerHTML = '';
+                    data.urls.forEach(url => {
+                        const div = document.createElement('div');
+                        div.className = 'list-item';
+                        div.innerHTML = `
+                            <span class="url">${url}</span>
+                            <button class="delete-btn" onclick="removeMonitorUrl('${url}')">Delete</button>
+                        `;
+                        container.appendChild(div);
+                    });
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                console.error('Failed to load monitor URLs:', error);
+            }
+        }
+
+        async function addMonitorUrl() {
+            const input = document.getElementById('monitorUrlInput');
+            const url = input.value.trim();
+            if (!url) {
+                showMessage('monitorMessage', 'Please enter a URL', true);
+                return;
+            }
+            try {
+                const formData = new FormData();
+                formData.append('url', url);
+                const response = await fetch('/api/monitor', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+                if (response.ok) {
+                    input.value = '';
+                    showMessage('monitorMessage', 'Monitor URL added successfully');
+                    loadMonitorUrls();
+                } else {
+                    const error = await response.json();
+                    showMessage('monitorMessage', error.detail || 'Failed to add URL', true);
+                }
+            } catch (error) {
+                showMessage('monitorMessage', 'Failed to add URL', true);
+            }
+        }
+
+        async function removeMonitorUrl(url) {
+            if (!confirm(`Remove monitor URL: ${url}?`)) {
+                return;
+            }
+            try {
+                const encodedUrl = encodeURIComponent(url);
+                const response = await fetch(`/api/monitor?url=${encodedUrl}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    showMessage('monitorMessage', 'Monitor URL removed successfully');
+                    loadMonitorUrls();
+                } else {
+                    showMessage('monitorMessage', 'Failed to remove URL', true);
+                }
+            } catch (error) {
+                showMessage('monitorMessage', 'Failed to remove URL', true);
+            }
+        }
+
+        async function loadRssFeeds() {
+            try {
+                const response = await fetch('/api/rss', { headers });
+                if (response.ok) {
+                    const data = await response.json();
+                    const container = document.getElementById('rssList');
+                    if (data.feeds.length === 0) {
+                        container.innerHTML = '<div class="empty-state">No RSS feeds configured</div>';
+                        return;
+                    }
+                    container.innerHTML = '';
+                    data.feeds.forEach(feed => {
+                        const div = document.createElement('div');
+                        div.className = 'list-item';
+                        div.innerHTML = `
+                            <span class="url">${feed}</span>
+                            <button class="delete-btn" onclick="removeRssFeed('${feed}')">Delete</button>
+                        `;
+                        container.appendChild(div);
+                    });
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                console.error('Failed to load RSS feeds:', error);
+            }
+        }
+
+        async function addRssFeed() {
+            const input = document.getElementById('rssUrlInput');
+            const url = input.value.trim();
+            if (!url) {
+                showMessage('rssMessage', 'Please enter a URL', true);
+                return;
+            }
+            try {
+                const formData = new FormData();
+                formData.append('url', url);
+                const response = await fetch('/api/rss', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` },
+                    body: formData
+                });
+                if (response.ok) {
+                    input.value = '';
+                    showMessage('rssMessage', 'RSS feed added successfully');
+                    loadRssFeeds();
+                } else {
+                    const error = await response.json();
+                    showMessage('rssMessage', error.detail || 'Failed to add feed', true);
+                }
+            } catch (error) {
+                showMessage('rssMessage', 'Failed to add feed', true);
+            }
+        }
+
+        async function removeRssFeed(url) {
+            if (!confirm(`Remove RSS feed: ${url}?`)) {
+                return;
+            }
+            try {
+                const encodedUrl = encodeURIComponent(url);
+                const response = await fetch(`/api/rss?url=${encodedUrl}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    showMessage('rssMessage', 'RSS feed removed successfully');
+                    loadRssFeeds();
+                } else {
+                    showMessage('rssMessage', 'Failed to remove feed', true);
+                }
+            } catch (error) {
+                showMessage('rssMessage', 'Failed to remove feed', true);
+            }
+        }
+
+        async function loadLogs() {
+            try {
+                const limit = parseInt(document.getElementById('logLimit')?.value || '100');
+                const response = await fetch(`/api/logs?limit=${limit}`, { headers });
+                if (response.ok) {
+                    const data = await response.json();
+                    const container = document.getElementById('logsList');
+                    if (data.logs.length === 0) {
+                        container.innerHTML = '<div class="empty-state">No moderation logs yet</div>';
+                        return;
+                    }
+                    container.innerHTML = '';
+                    // Reverse to show newest first
+                    data.logs.reverse().forEach(log => {
+                        const div = document.createElement('div');
+                        div.className = 'log-entry';
+                        const date = new Date(log.timestamp);
+                        const timeStr = date.toLocaleString();
+                        div.innerHTML = `
+                            <div class="log-guild">${log.guild_name || 'Unknown Guild'}</div>
+                            <div class="log-timestamp">${timeStr}</div>
+                            <div class="log-message">${escapeHtml(log.message)}</div>
+                        `;
+                        container.appendChild(div);
+                    });
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                console.error('Failed to load logs:', error);
+            }
+        }
+
+        async function exportLogs(format) {
+            try {
+                const response = await fetch(`/api/logs/export?format=${format}`, { headers });
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `moderation_logs.${format}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                } else if (response.status === 401) {
+                    logout();
+                } else {
+                    alert('Failed to export logs');
+                }
+            } catch (error) {
+                console.error('Failed to export logs:', error);
+                alert('Failed to export logs');
+            }
+        }
+
+        async function createBackup() {
+            try {
+                showMessage('backupMessage', 'Creating backup...', false);
+                const response = await fetch('/api/backup', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    showMessage('backupMessage', 'Backup created successfully!', false);
+                    loadBackups();
+                } else if (response.status === 401) {
+                    logout();
+                } else {
+                    const error = await response.json();
+                    showMessage('backupMessage', `Failed to create backup: ${error.detail || 'Unknown error'}`, true);
+                }
+            } catch (error) {
+                console.error('Failed to create backup:', error);
+                showMessage('backupMessage', 'Failed to create backup', true);
+            }
+        }
+
+        async function loadBackups() {
+            try {
+                const response = await fetch('/api/backups', { headers });
+                if (response.ok) {
+                    const data = await response.json();
+                    const container = document.getElementById('backupsList');
+                    if (data.backups.length === 0) {
+                        container.innerHTML = '<div class="empty-state">No backups available</div>';
+                        return;
+                    }
+                    container.innerHTML = '';
+                    data.backups.forEach(backup => {
+                        const div = document.createElement('div');
+                        div.className = 'list-item';
+                        div.style.padding = '15px';
+                        div.style.marginBottom = '10px';
+                        div.style.border = '1px solid #ddd';
+                        div.style.borderRadius = '5px';
+                        div.innerHTML = `
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <div>
+                                    <strong>${backup.name}</strong><br>
+                                    <small style="color: #666;">${backup.timestamp || 'Unknown date'}</small><br>
+                                    <small style="color: #666;">${backup.files?.length || 0} files</small>
+                                </div>
+                            </div>
+                        `;
+                        container.appendChild(div);
+                    });
+                } else if (response.status === 401) {
+                    logout();
+                }
+            } catch (error) {
+                console.error('Failed to load backups:', error);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Allow Enter key to submit forms
+        document.getElementById('monitorUrlInput')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addMonitorUrl();
+        });
+        document.getElementById('rssUrlInput')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') addRssFeed();
+        });
+
+        // Initial load
+        loadStats();
+        loadFeatures();
+        setInterval(loadStats, 5000);
+    </script>
+</body>
+</html>
