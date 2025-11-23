@@ -4,6 +4,7 @@ require 'sinatra/base'
 require 'json'
 require 'rack/attack'
 require_relative 'relay'
+require_relative 'auth'
 
 module RubyBot
   # Sinatra API server
@@ -25,8 +26,62 @@ module RubyBot
       @settings = settings
     end
 
+    # Helper to get current authenticated user
+    def current_user
+      return nil unless request.env['HTTP_AUTHORIZATION']
+
+      token = Auth.extract_token(request.env['HTTP_AUTHORIZATION'])
+      return nil unless token
+
+      Auth.verify_token(token, @settings.dashboard_secret_key)
+    end
+
+    # Before filter to protect routes
+    # Before filter to protect routes (except health)
+    before do
+      # Skip auth check for public routes
+      pass if request.path == '/api/health'
+      pass if request.path == '/api/auth/login' && request.post?
+      pass if request.path.start_with?('/dashboard')
+      pass if request.path == '/'
+      
+      # Require auth for API routes
+      if request.path.start_with?('/api/')
+        unless current_user
+          content_type :json
+          halt 401, JSON.generate({ error: 'Authentication required' })
+        end
+      end
+    end
+
     get '/' do
       redirect '/dashboard'
+    end
+
+    post '/api/auth/login' do
+      content_type :json
+      
+      username = params[:username] || (JSON.parse(request.body.read)['username'] rescue nil)
+      password = params[:password] || (JSON.parse(request.body.read)['password'] rescue nil)
+      
+      unless username && password
+        status 400
+        return JSON.generate({ error: 'Username and password required' })
+      end
+      
+      if Auth.authenticate_user(username, password, @settings)
+        access_token = Auth.create_access_token(
+          { sub: username },
+          @settings.dashboard_secret_key
+        )
+        JSON.generate({ access_token: access_token, token_type: 'bearer' })
+      else
+        status 401
+        JSON.generate({ error: 'Incorrect username or password' })
+      end
+    rescue JSON::ParserError
+      status 400
+      JSON.generate({ error: 'Invalid JSON' })
     end
 
     get '/dashboard' do
@@ -66,6 +121,7 @@ module RubyBot
 </html>'
     end
 
+    # Health endpoint doesn't require auth
     get '/api/health' do
       content_type :json
       stats = @coordinator.get_health_stats

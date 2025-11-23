@@ -26,6 +26,9 @@ gem 'json', '~> 2.6'
 # Encryption
 gem 'bcrypt', '~> 3.1'
 
+# JWT for authentication
+gem 'jwt', '~> 2.7'
+
 # RSS parsing
 gem 'rss', '~> 0.2'
 

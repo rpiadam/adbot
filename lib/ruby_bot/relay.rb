@@ -116,7 +116,7 @@ module RubyBot
     def get_health_stats
       uptime_seconds = get_uptime
       discord_ready = @discord_bot&.connected? || false
-      irc_connected = @irc_bots.any?(&:connected?)
+      irc_connected = @irc_bots&.any? { |bot| bot.connected? } || false
       
       {
         uptime_seconds: uptime_seconds,
@@ -140,8 +140,14 @@ module RubyBot
     private
 
     def setup_discord_events
+      require_relative 'commands'
+      
       @discord_bot.ready do |event|
         @logger.info("Discord bot connected as #{event.bot.profile.username}")
+        
+        # Register slash commands
+        RubyBot::Commands.register_commands(@discord_bot, self)
+        @logger.info("Discord slash commands registered")
         
         channel = @discord_bot.channel(@settings.discord_channel_id)
         if channel

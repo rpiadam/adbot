@@ -4,6 +4,7 @@ require_relative 'ruby_bot/version'
 require_relative 'ruby_bot/config'
 require_relative 'ruby_bot/storage'
 require_relative 'ruby_bot/relay'
+require_relative 'ruby_bot/auth'
 require_relative 'ruby_bot/api'
 
 module RubyBot

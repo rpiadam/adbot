@@ -11,7 +11,8 @@ module RubyBot
                 :monitor_urls, :rss_feeds, :feature_flags,
                 :welcome_channel_id, :welcome_message,
                 :moderation_log_channel_id, :monitor_interval_seconds,
-                :rss_poll_interval_seconds
+                :rss_poll_interval_seconds, :dashboard_username,
+                :dashboard_password, :dashboard_secret_key
 
     IRCNetworkConfig = Struct.new(:server, :port, :tls, :channel, :nick, keyword_init: true)
 
@@ -42,6 +43,10 @@ module RubyBot
       
       @api_host = env_optional('API_HOST') || '0.0.0.0'
       @api_port = (env_optional('API_PORT') || '8000').to_i
+      
+      @dashboard_username = env_optional('DASHBOARD_USERNAME')
+      @dashboard_password = env_optional('DASHBOARD_PASSWORD')
+      @dashboard_secret_key = env_optional('DASHBOARD_SECRET_KEY') || 'change-me-in-production'
       
       @feature_flags = {
         games: true,
