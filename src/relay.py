@@ -41,8 +41,10 @@ class IRCRelayClient(pydle.Client):
 
     def __init__(self, coordinator: "RelayCoordinator", network_config):
         loop = asyncio.get_running_loop()
+        fallback_nicks = [f"{network_config.nick}_{i}" for i in range(1, 4)]
         super().__init__(
             nickname=network_config.nick,
+            fallback_nicknames=fallback_nicks,
             realname=network_config.nick,
             eventloop=loop,
         )
@@ -50,6 +52,18 @@ class IRCRelayClient(pydle.Client):
         self.network_config = network_config
         self.target_channel = network_config.channel
         self._is_first_connect = True
+
+    async def _register(self):
+        """Ensure nickname list is initialized before registering."""
+        if not getattr(self, "_attempt_nicknames", None):
+            # pydle can leave this empty if a previous registration attempt failed early.
+            self._attempt_nicknames = self._nicknames[:] or [self.network_config.nick]
+            logger.debug(
+                "Reinitialized IRC nickname attempts for %s to %s",
+                self.network_config.server,
+                self._attempt_nicknames,
+            )
+        await super()._register()
 
     async def on_connect(self):
         await super().on_connect()
@@ -78,21 +92,13 @@ class IRCRelayClient(pydle.Client):
         await self.coordinator.handle_irc_quit(user, message or "")
 
     async def on_disconnect(self, expected):
-        await super().on_disconnect(expected)
+        # Don't call super().on_disconnect() because it tries to auto-reconnect,
+        # which can cause issues when the connection writer is None.
+        # The reconnection is handled by the _start_irc_client loop instead.
         logger.warning("Disconnected from IRC (expected=%s)", expected)
-        if not expected:
-            # Unexpected disconnect - attempt to reconnect
-            logger.info("Attempting to reconnect to IRC...")
-            try:
-                await asyncio.sleep(5)  # Wait before reconnecting
-                await self.connect(
-                    self.network_config.server,
-                    self.network_config.port,
-                    tls=self.network_config.tls,
-                )
-            except Exception as e:
-                logger.error("Failed to reconnect to IRC %s:%s: %s", self.network_config.server, self.network_config.port, e)
-                self.coordinator.record_error()
+        # The parent's on_disconnect would try to reconnect automatically,
+        # but we handle reconnection in the _start_irc_client loop to avoid
+        # race conditions with the connection writer being None.
 
     async def on_raw(self, message):
         """Override to handle malformed IRC messages gracefully."""
@@ -624,61 +630,122 @@ class RelayCoordinator:
         client = self.irc_clients[client_index]
         network_config = self.settings.irc_networks[client_index]
         
-        while True:
-            try:
-                if not client.connected:
-                    await client.connect(
-                        network_config.server,
-                        network_config.port,
-                        tls=network_config.tls,
-                    )
-                await client.handle_forever()
-            except asyncio.CancelledError:
-                logger.info("IRC client task %s:%s cancelled", network_config.server, network_config.port)
-                break
-            except (ConnectionResetError, OSError) as e:
-                logger.warning("IRC connection lost %s:%s (%s), reconnecting...", network_config.server, network_config.port, type(e).__name__)
-                await self._recreate_irc_client(client_index)
-                client = self.irc_clients[client_index]
-                await asyncio.sleep(5)
-                continue
-            except RuntimeError as e:
-                error_str = str(e)
-                if "readuntil() called while another coroutine is already waiting" in error_str:
-                    # This is a known pydle concurrency issue with multiple IRC clients - suppress it
-                    logger.debug("IRC read conflict detected %s:%s, recreating client...", network_config.server, network_config.port)
-                    await self._recreate_irc_client(client_index)
-                    client = self.irc_clients[client_index]
-                    await asyncio.sleep(2)
-                    continue
-                else:
-                    logger.warning("RuntimeError in IRC client %s:%s: %s", network_config.server, network_config.port, error_str)
+        try:
+            while True:
+                try:
+                    if not client.connected:
+                        await client.connect(
+                            network_config.server,
+                            network_config.port,
+                            tls=network_config.tls,
+                        )
+                    await client.handle_forever()
+                except asyncio.CancelledError:
+                    logger.info("IRC client task %s:%s cancelled", network_config.server, network_config.port)
+                    # Ensure client is disconnected before exiting
+                    try:
+                        if client.connected:
+                            await client.disconnect(expected=True)
+                    except Exception:
+                        pass
+                    raise  # Re-raise to properly propagate cancellation
+                except (ConnectionResetError, OSError) as e:
+                    logger.warning("IRC connection lost %s:%s (%s), reconnecting...", network_config.server, network_config.port, type(e).__name__)
                     await self._recreate_irc_client(client_index)
                     client = self.irc_clients[client_index]
                     await asyncio.sleep(5)
                     continue
-            except Exception as e:
-                error_str = str(e)
-                # Also check for readuntil errors that might be caught as generic Exception
-                if "readuntil() called while another coroutine is already waiting" in error_str:
-                    logger.debug("IRC read conflict (generic Exception) %s:%s, recreating client...", network_config.server, network_config.port)
+                except RuntimeError as e:
+                    error_str = str(e)
+                    if "readuntil() called while another coroutine is already waiting" in error_str:
+                        # This is a known pydle concurrency issue with multiple IRC clients - suppress it
+                        logger.debug("IRC read conflict detected %s:%s, recreating client...", network_config.server, network_config.port)
+                        await self._recreate_irc_client(client_index)
+                        client = self.irc_clients[client_index]
+                        await asyncio.sleep(2)
+                        continue
+                    else:
+                        logger.warning("RuntimeError in IRC client %s:%s: %s", network_config.server, network_config.port, error_str)
+                        await self._recreate_irc_client(client_index)
+                        client = self.irc_clients[client_index]
+                        await asyncio.sleep(5)
+                        continue
+                except Exception as e:
+                    error_str = str(e)
+                    # Also check for readuntil errors that might be caught as generic Exception
+                    if "readuntil() called while another coroutine is already waiting" in error_str:
+                        logger.debug("IRC read conflict (generic Exception) %s:%s, recreating client...", network_config.server, network_config.port)
+                        await self._recreate_irc_client(client_index)
+                        client = self.irc_clients[client_index]
+                        await asyncio.sleep(2)
+                        continue
+                    logger.warning("Error in IRC client %s:%s: %s", network_config.server, network_config.port, error_str)
                     await self._recreate_irc_client(client_index)
                     client = self.irc_clients[client_index]
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(5)
                     continue
-                logger.warning("Error in IRC client %s:%s: %s", network_config.server, network_config.port, error_str)
-                await self._recreate_irc_client(client_index)
-                client = self.irc_clients[client_index]
-                await asyncio.sleep(5)
-                continue
+        except asyncio.CancelledError:
+            # Ensure cleanup on cancellation
+            try:
+                if client.connected:
+                    await client.disconnect(expected=True)
+            except Exception:
+                pass
+            raise
 
     async def shutdown(self) -> None:
-        if self.discord_bot.is_closed():
-            logger.debug("Discord bot already closed")
-        else:
-            await self.discord_bot.close()
+        """Shutdown all services cleanly."""
+        # Close Discord bot first (this should close all aiohttp sessions)
+        if not self.discord_bot.is_closed():
+            try:
+                # Close the bot and wait for it to complete
+                await asyncio.wait_for(self.discord_bot.close(), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning("Discord bot close timeout")
+            except Exception as e:
+                logger.warning("Error closing Discord bot: %s", e)
+        
+        # Close all IRC clients
+        disconnect_tasks = []
         for client in self.irc_clients:
             if client.connected:
-                await client.quit(message="Relay shutting down")
+                try:
+                    # Disconnect the client
+                    task = asyncio.create_task(client.quit(message="Relay shutting down"))
+                    disconnect_tasks.append(task)
+                except Exception as e:
+                    logger.warning("Error disconnecting IRC client %s:%s: %s", 
+                                 client.network_config.server, client.network_config.port, e)
+        
+        # Wait for all IRC disconnections to complete (with timeout)
+        if disconnect_tasks:
+            try:
+                await asyncio.wait_for(asyncio.gather(*disconnect_tasks, return_exceptions=True), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("IRC disconnection timeout, forcing disconnect")
+                # Force disconnect remaining clients
+                for client in self.irc_clients:
+                    if client.connected:
+                        try:
+                            await client.disconnect(expected=True)
+                        except Exception:
+                            pass
+        
+        # Ensure aiohttp sessions are closed (discord.py should handle this, but be explicit)
+        try:
+            if hasattr(self.discord_bot, 'http'):
+                http_client = self.discord_bot.http
+                # Try to get the session - discord.py uses different internal structures
+                if hasattr(http_client, '_HTTPClient__session'):
+                    session = http_client._HTTPClient__session
+                    if session and not session.closed:
+                        await session.close()
+                # Also try to close connector if it exists
+                if hasattr(http_client, '_HTTPClient__connector'):
+                    connector = http_client._HTTPClient__connector
+                    if connector and not connector.closed:
+                        await connector.close()
+        except Exception as e:
+            logger.debug("Error closing aiohttp session: %s", e)
 
 

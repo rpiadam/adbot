@@ -32,22 +32,48 @@ class ConfigurationCog(commands.Cog):
     # ------------------------------------------------------------------
     @monitor.command(name="list", description="Show all monitored URLs.")
     async def monitor_list(self, interaction: discord.Interaction) -> None:
-        urls = await self.coordinator.config_store.list_monitor_urls()
-        if not urls:
+        targets = await self.coordinator.config_store.list_monitor_targets()
+        if not targets:
             await interaction.response.send_message("No monitoring targets configured.", ephemeral=True)
             return
-        lines = "\n".join(f"- {url}" for url in urls)
-        await interaction.response.send_message(f"**Monitoring Targets**\n{lines}", ephemeral=True)
+        lines = []
+        for target in targets:
+            extras = []
+            if target.get("keyword"):
+                extras.append(f"keyword='{target['keyword']}'")
+            if target.get("expected_status"):
+                extras.append(f"expect={target['expected_status']}")
+            lines.append(f"- {target['url']} {' '.join(extras) if extras else ''}".rstrip())
+        await interaction.response.send_message(f"**Monitoring Targets**\n" + "\n".join(lines), ephemeral=True)
 
     @monitor.command(name="add", description="Add a new URL to the monitoring list.")
-    @app_commands.describe(url="URL to monitor for uptime")
-    async def monitor_add(self, interaction: discord.Interaction, url: str) -> None:
+    @app_commands.describe(
+        url="URL to monitor for uptime",
+        keyword="Optional substring that must exist in the response body",
+        expected_status="Optional exact HTTP status that must be returned",
+    )
+    async def monitor_add(
+        self,
+        interaction: discord.Interaction,
+        url: str,
+        keyword: Optional[str] = None,
+        expected_status: Optional[int] = None,
+    ) -> None:
         if not _is_valid_url(url):
             await interaction.response.send_message("Please provide a valid http(s) URL.", ephemeral=True)
             return
         added = await self.coordinator.config_store.add_monitor_url(url)
         if not added:
             await interaction.response.send_message("That URL is already being monitored.", ephemeral=True)
+            return
+        try:
+            await self.coordinator.config_store.update_monitor_metadata(
+                url,
+                keyword=keyword,
+                expected_status=expected_status,
+            )
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
             return
         await interaction.response.send_message(f"Added `{url}` to monitoring targets.", ephemeral=True)
 
@@ -59,6 +85,44 @@ class ConfigurationCog(commands.Cog):
             await interaction.response.send_message("That URL is not currently monitored.", ephemeral=True)
             return
         await interaction.response.send_message(f"Removed `{url}` from monitoring targets.", ephemeral=True)
+
+    @monitor.command(name="configure", description="Update keyword/status expectations for a monitor.")
+    @app_commands.describe(
+        url="URL already being monitored",
+        keyword="Substring that must be present (leave blank to keep unchanged)",
+        expected_status="Exact HTTP status that must be returned",
+        clear_keyword="Remove keyword requirement",
+        clear_expected_status="Remove expected status requirement",
+    )
+    async def monitor_configure(
+        self,
+        interaction: discord.Interaction,
+        url: str,
+        keyword: Optional[str] = None,
+        expected_status: Optional[int] = None,
+        clear_keyword: bool = False,
+        clear_expected_status: bool = False,
+    ) -> None:
+        try:
+            metadata = await self.coordinator.config_store.update_monitor_metadata(
+                url,
+                keyword=keyword,
+                clear_keyword=clear_keyword,
+                expected_status=expected_status,
+                clear_expected_status=clear_expected_status,
+            )
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        if metadata is None:
+            await interaction.response.send_message("That URL is not currently monitored.", ephemeral=True)
+            return
+        keyword_value = metadata.get("keyword", "not set")
+        status_value = metadata.get("expected_status", "not set")
+        await interaction.response.send_message(
+            f"Updated `{url}` — keyword: {keyword_value}, expected_status: {status_value}",
+            ephemeral=True,
+        )
 
     # ------------------------------------------------------------------
     # RSS commands

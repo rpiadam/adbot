@@ -7,7 +7,7 @@ import json
 import tempfile
 
 from src.storage import ConfigStore
-from src.config import Settings
+from src.config import Settings, IRCNetworkConfig
 
 
 @pytest.fixture
@@ -34,11 +34,15 @@ def test_settings():
         welcome_channel_id=None,
         welcome_message=None,
         announcements_channel_id=None,
-        irc_server="test",
-        irc_port=6667,
-        irc_tls=False,
-        irc_channel="#test",
-        irc_nick="test",
+        irc_networks=[
+            IRCNetworkConfig(
+                server="irc.test",
+                port=6667,
+                tls=False,
+                channel="#test",
+                nick="testbot",
+            )
+        ],
         moderation_log_channel_id=None,
         moderation_muted_role_id=None,
         moderation_min_account_age_days=None,
@@ -96,6 +100,38 @@ async def test_monitor_urls(temp_config_file, test_settings):
     
     # Remove non-existent should fail
     assert await store.remove_monitor_url("https://nonexistent.com") is False
+
+
+@pytest.mark.asyncio
+async def test_monitor_metadata_and_history(temp_config_file, test_settings):
+    """Ensure monitor metadata and history are persisted."""
+    store = ConfigStore(test_settings, path=temp_config_file)
+
+    url = "https://history.test"
+    assert await store.add_monitor_url(url) is True
+
+    metadata = await store.update_monitor_metadata(
+        url,
+        keyword="ok",
+        expected_status=200,
+    )
+    assert metadata == {"keyword": "ok", "expected_status": 200}
+
+    sample = {
+        "timestamp": "2025-01-01T00:00:00Z",
+        "status_code": 200,
+        "latency_ms": 123.4,
+        "is_up": True,
+        "reason": None,
+    }
+    await store.record_monitor_sample(url, sample, max_entries=5)
+
+    history = await store.get_monitor_history(url, limit=5)
+    assert len(history) == 1
+    assert history[0]["latency_ms"] == 123.4
+
+    snapshot = await store.get_monitor_snapshot(url)
+    assert snapshot["is_up"] is True
 
 
 @pytest.mark.asyncio

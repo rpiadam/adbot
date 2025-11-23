@@ -15,6 +15,7 @@ UpLove is a production-ready Python bot that bridges Discord and IRC while power
 - **Backup/Restore**: Configuration backup and restore functionality.
 - **Admin Utilities**: Announcements, runtime stats, and configuration diagnostics.
 - **Monitoring & Uptime**: Periodic URL checks with down/up alerts posted into Discord.
+- **Precision Monitoring**: Per-target latency, TLS expiry countdowns, and keyword/status assertions with historical samples.
 - **RSS Live Feed**: Poll configured RSS feeds and push new entries with rich embeds.
 - **Dynamic Configuration**: Manage monitoring targets and RSS feeds with slash commands.
 - **Music Playback**: Playlist-aware queue with rich now-playing embeds and thumbnails powered by yt-dlp + FFmpeg.
@@ -132,6 +133,7 @@ Access the dashboard at `http://<API_HOST>:<API_PORT>/` to:
 - View real-time bot statistics
 - Toggle feature flags on/off
 - Manage monitor URLs
+- Inspect individual monitor history with latency, HTTP status, and TLS metadata
 - Manage RSS feeds
 
 **Security**: The dashboard supports both plain text and bcrypt-hashed passwords. For production, use a hashed password:

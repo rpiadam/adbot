@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Optional, TYPE_CHECKING
+import time
+from datetime import datetime, timezone
+from typing import Optional, TYPE_CHECKING, Any
 
 import aiohttp
 import discord
@@ -59,24 +61,122 @@ class MonitoringCog(commands.Cog):
 
     @tasks.loop(seconds=60)
     async def monitor_websites(self) -> None:
-        urls = await self.coordinator.config_store.list_monitor_urls()
-        if not urls:
+        targets = await self.coordinator.config_store.list_monitor_targets()
+        if not targets:
             return
         session = await self._get_session()
-        for url in urls:
-            try:
-                async with session.get(url, allow_redirects=True) as response:
-                    is_up = 200 <= response.status < 400
-            except aiohttp.ClientError:
-                is_up = False
-            prev = self._status_cache.get(url)
-            self._status_cache[url] = is_up
-            if prev is None:
+        for target in targets:
+            url = target["url"]
+            result = await self._probe_target(session, target)
+            await self.coordinator.config_store.record_monitor_sample(url, result)
+            prev_status = self._status_cache.get(url)
+            self._status_cache[url] = result["is_up"]
+            if prev_status is None:
                 continue
-            if prev and not is_up:
-                await self._announce(f"🔻 {url} appears to be **down**.")
-            elif not prev and is_up:
-                await self._announce(f"✅ {url} has recovered and is back online.")
+            if prev_status and not result["is_up"]:
+                reason = result.get("reason") or "unknown issue"
+                await self._announce(f"🔻 {url} appears to be **down** ({reason}).")
+            elif not prev_status and result["is_up"]:
+                latency = result.get("latency_ms")
+                latency_str = f"{latency:.0f} ms" if latency is not None else "restored"
+                await self._announce(f"✅ {url} has recovered ({latency_str}).")
+
+    async def _probe_target(self, session: aiohttp.ClientSession, target: dict[str, Any]) -> dict[str, Any]:
+        url = target["url"]
+        metadata = {
+            "keyword": target.get("keyword"),
+            "expected_status": target.get("expected_status"),
+        }
+        timestamp = datetime.now(timezone.utc).isoformat()
+        base_result: dict[str, Any] = {
+            "url": url,
+            "timestamp": timestamp,
+            "keyword": metadata["keyword"],
+            "expected_status": metadata["expected_status"],
+        }
+
+        start = time.perf_counter()
+        try:
+            async with session.get(url, allow_redirects=True) as response:
+                latency_ms = (time.perf_counter() - start) * 1000
+                status_code = response.status
+                is_up = 200 <= status_code < 400
+                reason: Optional[str] = None
+
+                expected_status = metadata["expected_status"]
+                if expected_status is not None and status_code != expected_status:
+                    is_up = False
+                    reason = f"status {status_code}, expected {expected_status}"
+
+                keyword = metadata["keyword"]
+                keyword_present: Optional[bool] = None
+                if keyword:
+                    body_text = await self._read_body_sample(response)
+                    keyword_present = keyword.lower() in body_text.lower()
+                    if not keyword_present:
+                        is_up = False
+                        reason = f"missing keyword '{keyword}'"
+
+                tls_days_remaining = self._extract_tls_days_remaining(response)
+
+                if not is_up and reason is None:
+                    reason = f"HTTP {status_code}"
+
+                base_result.update(
+                    {
+                        "status_code": status_code,
+                        "is_up": is_up,
+                        "latency_ms": round(latency_ms, 2),
+                        "reason": reason,
+                        "keyword_present": keyword_present,
+                        "tls_days_remaining": tls_days_remaining,
+                    }
+                )
+                return base_result
+        except asyncio.TimeoutError:
+            base_result.update(
+                {
+                    "is_up": False,
+                    "reason": "request timed out",
+                }
+            )
+        except aiohttp.ClientError as exc:
+            base_result.update(
+                {
+                    "is_up": False,
+                    "reason": str(exc),
+                }
+            )
+
+        return base_result
+
+    async def _read_body_sample(self, response: aiohttp.ClientResponse, limit: int = 256_000) -> str:
+        try:
+            chunk = await response.content.read(limit)
+        except Exception:
+            return ""
+        return chunk.decode("utf-8", errors="ignore")
+
+    def _extract_tls_days_remaining(self, response: aiohttp.ClientResponse) -> Optional[int]:
+        if response.url.scheme != "https":
+            return None
+        connection = response.connection
+        if connection is None or connection.transport is None:
+            return None
+        ssl_object = connection.transport.get_extra_info("ssl_object")
+        if ssl_object is None:
+            return None
+        cert = ssl_object.getpeercert()
+        not_after = cert.get("notAfter")
+        if not not_after:
+            return None
+        try:
+            expiry = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+        delta = expiry - datetime.now(timezone.utc)
+        days = int(delta.total_seconds() // 86400)
+        return max(days, 0)
 
     @monitor_websites.before_loop
     async def before_monitor(self) -> None:
@@ -86,12 +186,55 @@ class MonitoringCog(commands.Cog):
 
     @app_commands.command(name="monitorlist", description="List the URLs currently being monitored.")
     async def monitor_list(self, interaction: discord.Interaction) -> None:
-        urls = await self.coordinator.config_store.list_monitor_urls()
-        if not urls:
+        targets = await self.coordinator.config_store.list_monitor_targets()
+        if not targets:
             await interaction.response.send_message("No monitoring targets configured.", ephemeral=True)
             return
-        lines = "\n".join(f"- {url}" for url in urls)
-        await interaction.response.send_message(f"**Monitoring Targets**\n{lines}", ephemeral=True)
+
+        lines = []
+        for target in targets:
+            url = target["url"]
+            snapshot = await self.coordinator.config_store.get_monitor_snapshot(url)
+            status = snapshot["is_up"] if snapshot else None
+            emoji = "✅" if status else ("🔻" if status is False else "⚪️")
+            extras: list[str] = []
+            if snapshot and snapshot.get("latency_ms") is not None:
+                extras.append(f"{snapshot['latency_ms']:.0f} ms")
+            if snapshot and snapshot.get("status_code"):
+                extras.append(f"HTTP {snapshot['status_code']}")
+            if snapshot and snapshot.get("tls_days_remaining") is not None:
+                extras.append(f"TLS {snapshot['tls_days_remaining']}d")
+            if target.get("keyword"):
+                extras.append(f"keyword='{target['keyword']}'")
+            if target.get("expected_status"):
+                extras.append(f"expect={target['expected_status']}")
+            lines.append(f"{emoji} {url} ({', '.join(extras) if extras else 'no samples yet'})")
+
+        await interaction.response.send_message("**Monitoring Targets**\n" + "\n".join(lines), ephemeral=True)
+
+    @app_commands.command(name="monitorhistory", description="Show recent check history for a URL.")
+    @app_commands.describe(url="URL to inspect", limit="Number of recent samples to include (max 15)")
+    async def monitor_history(
+        self,
+        interaction: discord.Interaction,
+        url: str,
+        limit: app_commands.Range[int, 1, 15] = 5,
+    ) -> None:
+        history = await self.coordinator.config_store.get_monitor_history(url, limit=limit)
+        if not history:
+            await interaction.response.send_message("No samples recorded for that URL yet.", ephemeral=True)
+            return
+
+        lines = []
+        for sample in reversed(history):
+            status = "UP" if sample.get("is_up") else "DOWN"
+            latency = f"{sample.get('latency_ms', 0):.0f} ms" if sample.get("latency_ms") is not None else "n/a"
+            status_code = sample.get("status_code") or "-"
+            reason = sample.get("reason") or "ok"
+            timestamp = sample.get("timestamp", "unknown")
+            lines.append(f"[{timestamp}] {status} ({status_code}, {latency}) – {reason}")
+
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     async def cog_app_command_error(
         self,

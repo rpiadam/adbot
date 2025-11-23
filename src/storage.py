@@ -5,7 +5,7 @@ import asyncio
 import datetime
 import json
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 from .config import Settings
 
@@ -19,6 +19,8 @@ class ConfigStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
         self._monitor_urls: list[str] = list(settings.monitor_urls)
+        self._monitor_metadata: dict[str, dict[str, Any]] = {}
+        self._monitor_history: dict[str, list[dict[str, Any]]] = {}
         self._rss_feeds: list[str] = list(settings.rss_feeds)
         self._credits: dict[str, int] = {}
         self._football_defaults: dict[str, str] = {}
@@ -56,6 +58,32 @@ class ConfigStore:
         monitor_urls = payload.get("monitor_urls")
         if isinstance(monitor_urls, list):
             self._monitor_urls = [str(item).strip() for item in monitor_urls if str(item).strip()]
+
+        monitor_metadata = payload.get("monitor_metadata")
+        if isinstance(monitor_metadata, dict):
+            normalized_meta: dict[str, dict[str, Any]] = {}
+            for key, meta in monitor_metadata.items():
+                if not isinstance(meta, dict):
+                    continue
+                normalized_meta[str(key)] = {
+                    k: meta[k]
+                    for k in ("keyword", "expected_status", "verify_tls")
+                    if k in meta
+                }
+            self._monitor_metadata = normalized_meta
+
+        monitor_history = payload.get("monitor_history")
+        if isinstance(monitor_history, dict):
+            normalized_history: dict[str, list[dict[str, Any]]] = {}
+            for key, entries in monitor_history.items():
+                if not isinstance(entries, list):
+                    continue
+                normalized_entries: list[dict[str, Any]] = []
+                for entry in entries[-100:]:
+                    if isinstance(entry, dict):
+                        normalized_entries.append(entry)
+                normalized_history[str(key)] = normalized_entries
+            self._monitor_history = normalized_history
 
         rss_feeds = payload.get("rss_feeds")
         if isinstance(rss_feeds, list):
@@ -129,6 +157,8 @@ class ConfigStore:
     async def _persist(self) -> None:
         state = {
             "monitor_urls": self._monitor_urls,
+            "monitor_metadata": self._monitor_metadata,
+            "monitor_history": self._monitor_history,
             "rss_feeds": self._rss_feeds,
             "credits": self._credits,
             "football_defaults": self._football_defaults,
@@ -173,6 +203,8 @@ class ConfigStore:
             if url in self._monitor_urls:
                 return False
             self._monitor_urls.append(url)
+            self._monitor_metadata.setdefault(url, {})
+            self._monitor_history.setdefault(url, [])
             await self._persist()
             return True
 
@@ -182,8 +214,93 @@ class ConfigStore:
             if url not in self._monitor_urls:
                 return False
             self._monitor_urls.remove(url)
+            self._monitor_metadata.pop(url, None)
+            self._monitor_history.pop(url, None)
             await self._persist()
             return True
+
+    async def list_monitor_targets(self) -> list[dict[str, Any]]:
+        async with self._lock:
+            targets: list[dict[str, Any]] = []
+            for url in self._monitor_urls:
+                metadata = dict(self._monitor_metadata.get(url, {}))
+                targets.append({"url": url, **metadata})
+            return targets
+
+    async def update_monitor_metadata(
+        self,
+        url: str,
+        *,
+        keyword: Optional[str] = None,
+        clear_keyword: bool = False,
+        expected_status: Optional[int] = None,
+        clear_expected_status: bool = False,
+        verify_tls: Optional[bool] = None,
+    ) -> Optional[dict[str, Any]]:
+        url = url.strip()
+        async with self._lock:
+            if url not in self._monitor_urls:
+                return None
+            metadata = self._monitor_metadata.setdefault(url, {})
+
+            if clear_keyword:
+                metadata.pop("keyword", None)
+            elif keyword is not None:
+                keyword = keyword.strip()
+                if keyword:
+                    metadata["keyword"] = keyword
+                else:
+                    metadata.pop("keyword", None)
+
+            if clear_expected_status:
+                metadata.pop("expected_status", None)
+            elif expected_status is not None:
+                if expected_status < 100 or expected_status > 599:
+                    raise ValueError("expected_status must be between 100 and 599")
+                metadata["expected_status"] = expected_status
+
+            if verify_tls is not None:
+                metadata["verify_tls"] = bool(verify_tls)
+
+            # Remove empty metadata dictionaries to keep payload small
+            if not metadata:
+                self._monitor_metadata.pop(url, None)
+
+            await self._persist()
+            return dict(metadata)
+
+    async def get_monitor_metadata(self, url: str) -> dict[str, Any]:
+        async with self._lock:
+            return dict(self._monitor_metadata.get(url.strip(), {}))
+
+    async def record_monitor_sample(
+        self,
+        url: str,
+        sample: dict[str, Any],
+        *,
+        max_entries: int = 50,
+    ) -> None:
+        url = url.strip()
+        if not url:
+            return
+        async with self._lock:
+            history = self._monitor_history.setdefault(url, [])
+            history.append(sample)
+            if len(history) > max_entries:
+                self._monitor_history[url] = history[-max_entries:]
+            await self._persist()
+
+    async def get_monitor_history(self, url: str, limit: int = 10) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
+        async with self._lock:
+            history = self._monitor_history.get(url.strip(), [])
+            return list(history[-limit:])
+
+    async def get_monitor_snapshot(self, url: str) -> Optional[dict[str, Any]]:
+        async with self._lock:
+            history = self._monitor_history.get(url.strip(), [])
+            return history[-1] if history else None
 
     # ---------------------------------------------------------------------
     # RSS feeds management

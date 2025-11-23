@@ -166,19 +166,53 @@ async def main_async() -> None:
         logging.exception("Fatal error in Discord bot")
         raise
     finally:
+        # Shutdown coordinator first (this will close Discord and IRC clients)
+        try:
+            await coordinator.shutdown()
+        except Exception as e:
+            logger.warning("Error during coordinator shutdown: %s", e)
+        
         # Cancel tasks if they're still running
         if not api_task.done():
             api_task.cancel()
         if not irc_task.done():
             irc_task.cancel()
         
-        await coordinator.shutdown()
-        
         # Wait for tasks to complete, suppressing cancellation and other errors
-        with suppress(asyncio.CancelledError, SystemExit, Exception):
-            await api_task
-        with suppress(asyncio.CancelledError, SystemExit, Exception):
-            await irc_task
+        # Use gather with return_exceptions to ensure all tasks are awaited
+        tasks_to_wait = []
+        if not api_task.done():
+            tasks_to_wait.append(api_task)
+        if not irc_task.done():
+            tasks_to_wait.append(irc_task)
+        
+        if tasks_to_wait:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks_to_wait, return_exceptions=True),
+                    timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Shutdown timeout, some tasks may not have completed cleanly")
+            except Exception as e:
+                logger.debug("Error waiting for tasks: %s", e)
+        
+        # Cancel any remaining pending tasks (except the current one)
+        try:
+            loop = asyncio.get_running_loop()
+            pending_tasks = [t for t in asyncio.all_tasks(loop) if not t.done() and t is not asyncio.current_task()]
+            if pending_tasks:
+                logger.debug("Cancelling %d pending tasks", len(pending_tasks))
+                for task in pending_tasks:
+                    task.cancel()
+                # Wait briefly for cancellations to propagate
+                if pending_tasks:
+                    await asyncio.gather(*pending_tasks, return_exceptions=True)
+        except Exception as e:
+            logger.debug("Error cancelling pending tasks: %s", e)
+        
+        # Give a small delay to allow any remaining cleanup
+        await asyncio.sleep(0.1)
 
 
 def main() -> None:

@@ -159,18 +159,80 @@ def create_app(coordinator: RelayCoordinator, settings: Settings) -> FastAPI:
     @app.get("/api/monitor")
     @limiter.limit("30/minute")
     async def get_monitor_urls(request: Request, user: dict = Depends(get_current_user)):
-        """Get all monitor URLs."""
-        urls = await coordinator.config_store.list_monitor_urls()
-        return {"urls": urls}
+        """Get all monitor URLs and their latest status."""
+        targets = await coordinator.config_store.list_monitor_targets()
+        enriched = []
+        for target in targets:
+            snapshot = await coordinator.config_store.get_monitor_snapshot(target["url"])
+            enriched.append({**target, "latest": snapshot})
+        return {
+            "urls": [target["url"] for target in targets],
+            "targets": enriched,
+        }
+
+    @app.get("/api/monitor/history")
+    @limiter.limit("30/minute")
+    async def get_monitor_history(
+        request: Request,
+        url: str,
+        limit: int = 10,
+        user: dict = Depends(get_current_user),
+    ):
+        """Get recent check samples for a URL."""
+        history = await coordinator.config_store.get_monitor_history(url, limit=limit)
+        return {"url": url, "history": history}
+
+    def _parse_form_bool(value: Optional[str]) -> bool:
+        return bool(value) and value.lower() in ("true", "1", "yes", "on")
 
     @app.post("/api/monitor")
     @limiter.limit("10/minute")
-    async def add_monitor_url(request: Request, url: str = Form(...), user: dict = Depends(get_current_user)):
+    async def add_monitor_url(
+        request: Request,
+        url: str = Form(...),
+        keyword: Optional[str] = Form(None),
+        expected_status: Optional[int] = Form(None),
+        user: dict = Depends(get_current_user),
+    ):
         """Add a monitor URL."""
         success = await coordinator.config_store.add_monitor_url(url)
         if not success:
             raise HTTPException(status_code=400, detail="URL already exists or is invalid")
+        try:
+            await coordinator.config_store.update_monitor_metadata(
+                url,
+                keyword=keyword,
+                expected_status=expected_status,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"url": url, "success": True}
+
+    @app.post("/api/monitor/configure")
+    @limiter.limit("10/minute")
+    async def configure_monitor_url(
+        request: Request,
+        url: str = Form(...),
+        keyword: Optional[str] = Form(None),
+        expected_status: Optional[int] = Form(None),
+        clear_keyword: Optional[str] = Form(None),
+        clear_expected_status: Optional[str] = Form(None),
+        user: dict = Depends(get_current_user),
+    ):
+        """Update metadata for a monitor URL."""
+        try:
+            metadata = await coordinator.config_store.update_monitor_metadata(
+                url,
+                keyword=keyword,
+                expected_status=expected_status,
+                clear_keyword=_parse_form_bool(clear_keyword),
+                clear_expected_status=_parse_form_bool(clear_expected_status),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if metadata is None:
+            raise HTTPException(status_code=404, detail="URL not found")
+        return {"url": url, "metadata": metadata, "success": True}
 
     @app.delete("/api/monitor")
     @limiter.limit("10/minute")

@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import shutil
 
-from src.config import Settings
+from src.config import Settings, IRCNetworkConfig
 
 
 @pytest.fixture(scope="session")
@@ -38,11 +38,15 @@ def minimal_settings():
         welcome_channel_id=None,
         welcome_message=None,
         announcements_channel_id=None,
-        irc_server="test.irc.server",
-        irc_port=6667,
-        irc_tls=False,
-        irc_channel="#test",
-        irc_nick="testbot",
+        irc_networks=[
+            IRCNetworkConfig(
+                server="test.irc.server",
+                port=6667,
+                tls=False,
+                channel="#test",
+                nick="testbot",
+            )
+        ],
         moderation_log_channel_id=None,
         moderation_muted_role_id=None,
         moderation_min_account_age_days=None,
