@@ -10,7 +10,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -107,9 +106,9 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
+# Note: lib/ is ignored for Python bytecode, but lib/ruby_bot/ is explicitly tracked
 sdist/
 var/
 wheels/
@@ -118,3 +117,23 @@ wheels/
 *.egg
 
 .env.backup*
+
+# Ruby
+*.gem
+*.rbc
+/.config
+/coverage/
+/InstalledFiles
+/pkg/
+/spec/reports/
+/spec/examples.txt
+/test/tmp/
+/test/version_tmp/
+/tmp/
+.bundle/
+vendor/bundle
+lib/bundler/man/
+Gemfile.lock
+.ruby-gemset
+# .ruby-version should be tracked
+*.rbs

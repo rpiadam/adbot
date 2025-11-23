@@ -1,6 +1,10 @@
 # UpLove – Community Operations Suite
 
-UpLove is a production-ready Python bot that bridges Discord and IRC while powering essential community operations: moderation, welcome automation, monitoring, RSS alerts, music playback, lightweight games, and Football Nation match broadcasts.
+UpLove is a production-ready bot that bridges Discord and IRC while powering essential community operations: moderation, welcome automation, monitoring, RSS alerts, music playback, lightweight games, and Football Nation match broadcasts.
+
+**Available in both Python and Ruby implementations:**
+- **Python Version** (default): Full-featured bot with all modules and cogs
+- **Ruby Version**: Core relay functionality with API (see [README_RUBY.md](README_RUBY.md))
 
 ## Features
 
@@ -22,7 +26,17 @@ UpLove is a production-ready Python bot that bridges Discord and IRC while power
 - **Games & Fun**: Coin flips, dice rolls, slots, hangman, tic-tac-toe, trivia, word ladders, and a credit-based gambling system with admin rewards.
 - **Help System**: Category-based help command that summarizes available commands.
 
-## Getting Started
+## Choose Your Language
+
+**Both Python and Ruby versions are available!** See [CHOOSING_LANGUAGE.md](CHOOSING_LANGUAGE.md) for a comparison and how to choose.
+
+**Quick Start:**
+- **Python** (full-featured): `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+- **Ruby** (core features): `bundle install`
+
+Both use the same `.env` configuration file!
+
+## Getting Started (Python)
 
 1. **Create a virtual environment and install dependencies:**
 
@@ -61,6 +75,8 @@ UpLove is a production-ready Python bot that bridges Discord and IRC while power
    ```
 
    The web server listens on `API_HOST:API_PORT` (default `0.0.0.0:8000`). The Discord bot connects using `DISCORD_TOKEN`, and the IRC client joins `IRC_CHANNEL`.
+
+   **For Ruby version**, see [README_RUBY.md](README_RUBY.md) for setup instructions.
 
 4. **Access the Web Dashboard (optional):**
 
