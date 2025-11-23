@@ -119,7 +119,7 @@ Include the header `X-Webhook-Secret` if `FOOTBALL_WEBHOOK_SECRET` is set. The b
 
 | Category    | Sample Slash Commands                                                                 |
 | ----------- | ------------------------------------------------------------------------------------- |
-| Features    | `/relaystatus`, `/relayping`, `/relayshutdown`                                        |
+| Features    | `/relaystatus`, `/relayping`, `/serverinfo`, `/downloadbot`, `/relayshutdown`         |
 | Moderation  | `/purge`, `/kick`, `/ban`, `/timeout`, `/slowmode`, `/warn`, `/roleadd`, `/temprole`   |
 | Admin       | `/relayannounce`, `/relaystats`, `/relaydebug`, `/relayreload`, `/relayrestart`       |
 | Games       | `/coinflip`, `/roll`, `/pick`, `/slots`, `/gamble`, `/hangman start`, `/tictactoe start`, `/trivia`, `/reward`, `/credits` |

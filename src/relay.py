@@ -347,7 +347,9 @@ class RelayCoordinator:
                 )
                 return
             self._discord_channel = channel
-            logger.info("Bridging Discord channel #%s (%s)", channel.name, channel.id)
+            guild = channel.guild
+            guild_name = guild.name if guild else "Unknown"
+            logger.info("Bridging Discord server '%s' (%s) channel #%s (%s)", guild_name, guild.id if guild else "N/A", channel.name, channel.id)
             try:
                 await channel.send("🔗 IRC relay is online.")
             except discord.Forbidden:
@@ -366,7 +368,8 @@ class RelayCoordinator:
                 except discord.HTTPException:
                     logger.exception("Failed to sync application commands for guild %s", guild.id if guild else "global")
                 else:
-                    logger.info("Slash commands synced for guild %s", guild.id if guild else "global")
+                    guild_name = guild.name if guild else "Unknown"
+                    logger.info("Slash commands synced for guild '%s' (%s)", guild_name, guild.id if guild else "global")
                     self._slash_synced = True
             else:
                 # No channel available, sync global commands as fallback

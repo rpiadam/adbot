@@ -6,10 +6,12 @@ Relay Management
 - `/relayannounce <message>` — send a formatted announcement to the configured channel.
 - `/relayreload` — reload dynamic configuration from disk and resync slash commands.
 - `/relayrestart` — gracefully restart the relay process.
-- `/relaystats` — view runtime statistics (guilds, latency, monitor targets, etc.).
+- `/relaystats` — view detailed runtime statistics (guilds, users, latency, uptime, message counts, health status, etc.).
 - `/relaydebug` — inspect environment and configuration context for troubleshooting.
-- `/relaystatus` — show Discord ↔ IRC bridge status.
+- `/relaystatus` — show Discord ↔ IRC bridge status with detailed network information.
 - `/relayping` — measure the relay's Discord latency.
+- `/serverinfo` — show information about the current Discord server (members, channels, roles, permissions, etc.).
+- `/downloadbot [version]` — download the bot code as a zip file (python or ruby version).
 - `/relayshutdown` — shut down the relay bot gracefully.
 - `/reward <member> <amount> [overwrite]` — grant or set gamble credits for a user.
 

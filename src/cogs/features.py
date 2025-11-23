@@ -36,20 +36,130 @@ class FeaturesCog(commands.Cog):
 
         discord_channel: Optional[discord.TextChannel] = await self.coordinator._ensure_discord_channel()
         webhook_configured = bool(self.coordinator.settings.discord_webhook_url)
+        guild = discord_channel.guild if discord_channel else None
 
-        parts = [
-            "**Relay Status**",
-            f"- Discord channel: #{discord_channel.name} ({discord_channel.id})",
-            f"- Webhook configured: {'yes' if webhook_configured else 'no'}",
-            "",
-            "**IRC Networks:**",
-        ]
+        embed = discord.Embed(
+            title="🔗 Relay Status",
+            colour=discord.Colour.green(),
+        )
         
+        if guild:
+            embed.add_field(
+                name="Discord Server",
+                value=f"{guild.name}\nID: {guild.id}",
+                inline=True,
+            )
+        
+        embed.add_field(
+            name="Discord Channel",
+            value=f"#{discord_channel.name}\nID: {discord_channel.id}",
+            inline=True,
+        )
+        
+        embed.add_field(
+            name="Webhook",
+            value="✅ Configured" if webhook_configured else "❌ Not configured",
+            inline=True,
+        )
+        
+        irc_status_parts = []
         for i, client in enumerate(self.coordinator.irc_clients, 1):
-            status = "✅ connected" if client.connected else "❌ disconnected"
-            parts.append(f"{i}. {client.network_config.server}:{client.network_config.port} → {client.network_config.channel} ({status})")
+            status_icon = "✅" if client.connected else "❌"
+            status_text = "connected" if client.connected else "disconnected"
+            irc_status_parts.append(
+                f"{status_icon} **{i}. {client.network_config.server}:{client.network_config.port}**\n"
+                f"   → {client.network_config.channel} ({status_text})"
+            )
+        
+        embed.add_field(
+            name=f"IRC Networks ({len(self.coordinator.irc_clients)})",
+            value="\n".join(irc_status_parts) if irc_status_parts else "No IRC networks configured",
+            inline=False,
+        )
 
-        await interaction.response.send_message("\n".join(parts))
+        await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="serverinfo", description="Show information about the current Discord server.")
+    async def server_info(self, interaction: discord.Interaction) -> None:
+        """Show information about the current Discord server."""
+        if not await self._assert_relay_channel(interaction):
+            return
+        
+        guild = interaction.guild
+        if guild is None:
+            await interaction.response.send_message(
+                "This command can only be used in a guild.",
+                ephemeral=True,
+            )
+            return
+        
+        # Get bot member in this guild
+        bot_member = guild.get_member(self.bot.user.id) if self.bot.user else None
+        
+        embed = discord.Embed(
+            title=f"📊 {guild.name}",
+            colour=discord.Colour.blurple(),
+        )
+        
+        if guild.icon:
+            embed.set_thumbnail(url=guild.icon.url)
+        
+        embed.add_field(
+            name="Server ID",
+            value=str(guild.id),
+            inline=True,
+        )
+        
+        embed.add_field(
+            name="Owner",
+            value=guild.owner.mention if guild.owner else "Unknown",
+            inline=True,
+        )
+        
+        embed.add_field(
+            name="Members",
+            value=f"{guild.member_count or 'N/A'}",
+            inline=True,
+        )
+        
+        embed.add_field(
+            name="Channels",
+            value=f"Text: {len(guild.text_channels)}\nVoice: {len(guild.voice_channels)}\nCategories: {len(guild.categories)}",
+            inline=True,
+        )
+        
+        embed.add_field(
+            name="Roles",
+            value=str(len(guild.roles)),
+            inline=True,
+        )
+        
+        embed.add_field(
+            name="Created",
+            value=f"<t:{int(guild.created_at.timestamp())}:R>",
+            inline=True,
+        )
+        
+        if bot_member:
+            embed.add_field(
+                name="Bot Permissions",
+                value=f"Administrator: {'✅' if guild.me.guild_permissions.administrator else '❌'}\n"
+                      f"Manage Messages: {'✅' if guild.me.guild_permissions.manage_messages else '❌'}\n"
+                      f"Send Messages: {'✅' if guild.me.guild_permissions.send_messages else '❌'}",
+                inline=True,
+            )
+        
+        # Check if this is the configured relay server
+        relay_channel = await self.coordinator._ensure_discord_channel()
+        if relay_channel and relay_channel.guild.id == guild.id:
+            embed.add_field(
+                name="Relay Status",
+                value=f"✅ Active\nChannel: {relay_channel.mention}",
+                inline=True,
+            )
+        
+        embed.set_footer(text=f"Server ID: {guild.id}")
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="relayping", description="Measure the relay's Discord latency.")
     async def relay_ping(self, interaction: discord.Interaction) -> None:
