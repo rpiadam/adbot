@@ -67,12 +67,40 @@ class IRCRelayClient(pydle.Client):
 
     async def on_connect(self):
         await super().on_connect()
+        # Optionally identify with NickServ (or similar) if a password is configured
+        password = getattr(self.network_config, "password", None)
+        if password:
+            try:
+                await self.message("NickServ", f"IDENTIFY {password}")
+            except Exception as e:  # pragma: no cover - operational logging
+                logger.warning(
+                    "Failed to identify with NickServ on %s:%s: %s",
+                    self.network_config.server,
+                    self.network_config.port,
+                    e,
+                )
+
         await self.join(self.target_channel)
+
+        # Optional Idlerpg LOGIN (global, but only when we're on the #idlerpg channel)
+        settings = getattr(self.coordinator, "settings", None)
+        if settings and self.target_channel.lower() == "#idlerpg":
+            idlerpg_user = getattr(settings, "idlerpg_username", None)
+            idlerpg_pass = getattr(settings, "idlerpg_password", None)
+            if idlerpg_user and idlerpg_pass:
+                try:
+                    await self.message("Idlerpg", f"LOGIN {idlerpg_user} {idlerpg_pass}")
+                except Exception as e:  # pragma: no cover - operational logging
+                    logger.warning(
+                        "Failed to send Idlerpg LOGIN on %s:%s: %s",
+                        self.network_config.server,
+                        self.network_config.port,
+                        e,
+                    )
         # Only count as reconnect if not the first connection
         if not self._is_first_connect:
             self.coordinator.record_irc_reconnect()
         self._is_first_connect = False
-        logger.info("Connected to IRC %s:%s as %s", self.network_config.server, self.network_config.port, self.nickname)
 
     async def on_message(self, target, source, message):
         await super().on_message(target, source, message)
@@ -641,6 +669,7 @@ class RelayCoordinator:
                             network_config.server,
                             network_config.port,
                             tls=network_config.tls,
+                            password=getattr(network_config, "password", None),
                         )
                     await client.handle_forever()
                 except asyncio.CancelledError:

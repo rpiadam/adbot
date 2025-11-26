@@ -188,6 +188,8 @@ class IRCNetworkConfig:
     tls: bool
     channel: str
     nick: str
+    # Optional NickServ/server password for this network.
+    password: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +233,8 @@ class Settings:
     router_snmp_community: Optional[str]
     router_stats_interval_seconds: int
     weather_api_key: Optional[str]
+    idlerpg_username: Optional[str]
+    idlerpg_password: Optional[str]
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -254,6 +258,8 @@ class Settings:
             irc_channels = _parse_csv(irc_channels_raw) if irc_channels_raw else []
             irc_nicks_raw = _get_env("IRC_NICKS", required=False, default="")
             irc_nicks = _parse_csv(irc_nicks_raw) if irc_nicks_raw else []
+            irc_passwords_raw = _get_env("IRC_PASSWORDS", required=False, default="")
+            irc_passwords = _parse_csv(irc_passwords_raw) if irc_passwords_raw else []
             
             # Default values
             default_port = int(_get_env("IRC_PORT", required=False, default="6667"))
@@ -265,6 +271,7 @@ class Settings:
                 tls = irc_tls_list[i] if i < len(irc_tls_list) else default_tls
                 channel = irc_channels[i] if i < len(irc_channels) else ""
                 nick = irc_nicks[i] if i < len(irc_nicks) else default_nick
+                password = irc_passwords[i] if i < len(irc_passwords) else None
                 
                 if not channel:
                     raise RuntimeError(f"IRC_CHANNELS must have an entry for each server (missing for server {i+1})")
@@ -275,17 +282,20 @@ class Settings:
                     tls=tls,
                     channel=channel,
                     nick=nick,
+                    password=password,
                 ))
         else:
             # Single network format (backward compatible)
             irc_port = int(_get_env("IRC_PORT", required=False, default="6667"))
             irc_tls = _get_env("IRC_TLS", required=False, default="false").lower() in {"1", "true", "yes"}
+            irc_password = _get_env("IRC_PASSWORD", required=False)
             irc_networks.append(IRCNetworkConfig(
                 server=_get_env("IRC_SERVER"),
                 port=irc_port,
                 tls=irc_tls,
                 channel=_get_env("IRC_CHANNEL"),
                 nick=_get_env("IRC_NICK"),
+                password=irc_password,
             ))
 
         settings = cls(
@@ -328,6 +338,8 @@ class Settings:
             router_snmp_community=_get_env("ROUTER_SNMP_COMMUNITY", required=False),
             router_stats_interval_seconds=int(_get_env("ROUTER_STATS_INTERVAL_SECONDS", required=False, default="3600")),
             weather_api_key=_get_env("WEATHER_API_KEY", required=False),
+            idlerpg_username=_get_env("IDLERPG_USERNAME", required=False),
+            idlerpg_password=_get_env("IDLERPG_PASSWORD", required=False),
         )
 
         logger.debug("Loaded settings: %s", settings)
